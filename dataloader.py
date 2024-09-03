@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 
-class Dataloader:
+class DataloaderEuropean1D:
     def __init__(self, time_range, S_range, K, r, sigma):
         self.time_range = time_range
         self.S_range = S_range
