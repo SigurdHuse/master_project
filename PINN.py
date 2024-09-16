@@ -2,11 +2,11 @@ import torch.nn as nn
 
 
 class PINN(nn.Module):
-    def __init__(self, N_INPUT, N_OUTPUT, N_HIDDEN, N_LAYERS):
+    def __init__(self, N_INPUT, N_OUTPUT, N_HIDDEN, N_LAYERS, activation_function=nn.ReLU()):
         super().__init__()
 
         self.N_HIDDEN = N_HIDDEN
-        self.activation = nn.ReLU()
+        self.activation = activation_function
 
         self.input_layer = nn.Sequential(
             nn.Linear(N_INPUT, N_HIDDEN),
