@@ -2,6 +2,8 @@ import numpy as np
 import torch
 
 
+# TODO write my own American 1D analytical solution
+
 class DataloaderEuropean1D:
     def __init__(self, time_range, S_range, K: float, r: float, sigma: float, DEVICE):
         self.time_range = time_range
@@ -174,3 +176,40 @@ class DataloaderEuropeanMultiDimensional(DataloaderEuropean1D):
         max_values = torch.tensor(
             [self.time_range[1]] + [t[1] for t in self.S_range]).to(self.DEVICE)
         return (X - min_values) / (max_values - min_values)
+
+
+class DataloaderAmerican1D(DataloaderEuropean1D):
+    def option_function(self, X):
+        # Put option
+        return np.fmax(self.K - X, 0)
+
+    def get_boundary_data(self, n, r1=1, r2=1):
+        T = self.time_range[-1]
+        lower_X = np.concatenate([np.random.uniform(*self.time_range, (int(n*r1), 1)),
+                                  self.S_range[0] * np.ones((int(n*r1), 1))], axis=1)
+        lower_y = self.K * np.ones((int(n*r1), 1))
+
+        upper_X = np.concatenate([np.random.uniform(*self.time_range, (int(r2*n), 1)),
+                                  self.S_range[-1] * np.ones((int(r2*n), 1))], axis=1)
+        upper_y = np.zeros((int(r2*n), 1))
+        return lower_X, lower_y, upper_X, upper_y
+
+    def _get_analytical_soln(self, S, t, n=250):
+        T = self.time_range[-1]-t
+        delta_t = T / n
+        u = torch.exp(self.sigma * torch.sqrt(delta_t))
+        d = 1 / u
+        p = (torch.exp(self.r * delta_t) - d) / (u - d)
+        # Initialize option values at maturity
+        option_values = torch.maximum(
+            self.K - S * u**torch.arange(n+1) * d**(n-torch.arange(n+1)), torch.zeros(n+1))
+        # Backward induction
+        for i in range(n-1, -1, -1):
+            option_values = torch.maximum((self.K - S * u**torch.arange(i+1) * d**(i-torch.arange(i+1))),
+                                          torch.exp(-self.r * delta_t) * (p * option_values[:i+1] + (1 - p) * option_values[1:i+2]))
+        return option_values[0]
+
+    def get_analytical_solution(self, S, t, n=250):
+        res = torch.tensor([self._get_analytical_soln(
+            S[i], t[i], n=n) for i in range(len(S))])
+        return res

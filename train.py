@@ -1,5 +1,5 @@
 from PINN import PINN
-from dataloader import DataloaderEuropean1D, DataloaderEuropeanMultiDimensional
+from dataloader import DataloaderEuropean1D, DataloaderEuropeanMultiDimensional, DataloaderAmerican1D
 import torch
 import torch.nn as nn
 import numpy as np
@@ -65,6 +65,29 @@ def black_scholes_1D(y1_hat, X1, config):
     bs_pde = dVdt + (0.5 * ((sigma * S1) ** 2) * d2VdS2) + \
         (r * S1 * dVdS) - (r * y1_hat)
     return bs_pde
+
+
+def black_scholes_american_1D(y1_hat, X1, config):
+    sigma = config["sigma"]
+    r = config["r"]
+    K = config["K"]
+
+    grads = torch.autograd.grad(y1_hat, X1, grad_outputs=torch.ones(y1_hat.shape).to(
+        DEVICE), retain_graph=True, create_graph=True, only_inputs=True)[0]
+    dVdt, dVdS = grads[:, 0].view(-1, 1), grads[:, 1].view(-1, 1)
+    grads2nd = torch.autograd.grad(dVdS, X1, grad_outputs=torch.ones(
+        dVdS.shape).to(DEVICE), create_graph=True, only_inputs=True)[0]
+    d2VdS2 = grads2nd[:, 1].view(-1, 1)
+    S1 = X1[:, 1].view(-1, 1)
+    bs_pde = dVdt + (0.5 * ((sigma * S1) ** 2) * d2VdS2) + \
+        (r * S1 * dVdS) - (r * y1_hat)
+    # free region: option exercise immediately
+    yint = torch.max(K - S1, torch.zeros_like(S1))
+    free_pde = y1_hat-yint
+
+    combined_pde = bs_pde*free_pde,
+    # print(type(combined_pde[1]))
+    return combined_pde[0]
 
 
 def create_validation_data(dataloader:
@@ -274,14 +297,14 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
     return best_validation_epoch
 
 
-def try_multiple_activation_function_european_1D(config):
+def try_multiple_activation_function_european_1D(config, dataloader_class, PDE, filename: str):
     sigma = config["sigma"]
     r = config["r"]
     K = config["K"]
     t_range = config["t_range"]
     S_range = config["S_range"]
 
-    dataloader = DataloaderEuropean1D(
+    dataloader = dataloader_class(
         t_range, S_range, K, r, sigma, DEVICE)
 
     validation_data = create_validation_data(dataloader, 2_000, config)
@@ -307,17 +330,17 @@ def try_multiple_activation_function_european_1D(config):
         for j, layer in enumerate(layers):
             model = PINN(2, 1, 400, layer, activation_function)
             _ = train(model, 10_000, config["learning_rate"], dataloader,
-                      config, filename, black_scholes_1D, validation_data)
+                      config, filename, PDE, validation_data)
 
             predicted = model(X1_test_scaled).cpu().detach().numpy()
 
             errors[i, j] = np.sum(
                 (analytical_solution - predicted)**2) / len(analytical_solution)
 
-    np.savetxt("important_results/different_activation.txt", errors)
+    np.savetxt(filename, errors)
 
 
-def try_different_learning_rates(config):
+def try_different_learning_rates(config, dataloader_class, PDE, filename1: str, filename2: str):
     # print(DEVICE)
     cur_config = config.copy()
     learning_rates = [1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5]
@@ -329,11 +352,11 @@ def try_different_learning_rates(config):
     t_range = config["t_range"]
     S_range = config["S_range"]
 
-    dataloader = DataloaderEuropean1D(
+    dataloader = dataloader_class(
         t_range, S_range, K, r, sigma, DEVICE)
 
     validation_data = create_validation_data(dataloader, 2_000, config)
-    test_data = create_validation_data(dataloader, 20_000, config)
+    test_data = create_validation_data(dataloader, 1_000, config)
 
     X1_test = test_data["X1_validation"]
     X1_test_scaled = test_data["X1_validation_scaled"]
@@ -354,7 +377,7 @@ def try_different_learning_rates(config):
             model.load_state_dict(start_model)
 
             best_epoch = train(model, 10_000, learning_rate, dataloader, cur_config, f"learning_{
-                               learning_rate}_{batch_size}", black_scholes_1D, validation_data)
+                               learning_rate}_{batch_size}", PDE, validation_data)
 
             predicted = model(X1_test_scaled).cpu().detach().numpy()
 
@@ -363,8 +386,8 @@ def try_different_learning_rates(config):
 
             epoch_data[i, j] = best_epoch
 
-    np.savetxt("important_results/mse_data_learning_rates.txt", mse_data)
-    np.savetxt("important_results/epoch_data_learning_rates.txt", epoch_data)
+    np.savetxt(filename1, mse_data)
+    np.savetxt(filename2, epoch_data)
 
 
 if __name__ == "__main__":
@@ -397,8 +420,13 @@ if __name__ == "__main__":
     config["save_model"] = False
     config["save_loss"] = False
 
-    # try_different_learning_rates(config)
-    try_multiple_activation_function_european_1D(config)
+    try_different_learning_rates(
+        config, DataloaderAmerican1D, black_scholes_american_1D, "important_results/mse_data_learning_rates_american.txt", "important_results/epoch_data_learning_rates_american.txt")
+
+    """ try_different_learning_rates(
+        config, DataloaderEuropean1D, black_scholes_1D, "important_results/mse_data_learning_rates.txt", "important_results/epoch_data_learning_rates.txt")
+    try_multiple_activation_function_european_1D(
+        config, DataloaderEuropean1D, black_scholes_1D, "important_results/different_activation.txt") """
 
     """ model = PINN(2, 1, 500, 2).to(DEVICE)
     validation_data = create_validation_data(dataloader, 1_000, config)

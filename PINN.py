@@ -2,7 +2,7 @@ import torch.nn as nn
 
 
 class PINN(nn.Module):
-    def __init__(self, N_INPUT, N_OUTPUT, N_HIDDEN, N_LAYERS, activation_function=nn.ReLU()):
+    def __init__(self, N_INPUT, N_OUTPUT, N_HIDDEN, N_LAYERS, activation_function=nn.LeakyReLU()):
         super().__init__()
 
         self.N_HIDDEN = N_HIDDEN
