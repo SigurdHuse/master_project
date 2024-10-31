@@ -15,6 +15,8 @@
 *.cb
 *.cb2
 .*.lb
+*.sqlite3
+*.log
 
 ## Intermediate documents:
 *.dvi

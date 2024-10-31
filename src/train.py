@@ -1,6 +1,7 @@
-from PINN import PINN
-from dataloader import DataloaderEuropean1D, DataloaderEuropeanMultiDimensional, DataloaderAmerican1D
+from PINN import PINNforwards
+from data_generator import DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D
 import torch
+from torch.optim.lr_scheduler import ExponentialLR
 import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
@@ -65,7 +66,7 @@ def black_scholes_1D(y1_hat, X1, config):
     d2VdS2 = grads2nd[:, 1].view(-1, 1)
 
     S1 = X1[:, 1].view(-1, 1)
-    bs_pde = dVdt + (0.5 * ((sigma * S1) ** 2) * d2VdS2) + \
+    bs_pde = dVdt + (0.5 * ((sigma**2) * (S1 ** 2)) * d2VdS2) + \
         (r * S1 * dVdS) - (r * y1_hat)
     return bs_pde
 
@@ -94,7 +95,7 @@ def black_scholes_american_1D(y1_hat, X1, config):
 
 
 def create_validation_data(dataloader:
-                           DataloaderEuropean1D, N_validation: int, config: dict) -> dict:
+                           DataGeneratorEuropean1D, N_validation: int, config: dict) -> dict:
     w_expiry = config["w_expiry"]
     w_lower = config["w_lower"]
     w_upper = config["w_upper"]
@@ -154,10 +155,7 @@ def train_one_epoch_european_1D(model, dataloader, loss_function, optimizer, con
     w_lower = config["w_lower"]
     w_upper = config["w_upper"]
     N_sample = config["N_sample"]
-    pde_learning_rate = config["pde_learning_rate"]
-    # BVP1_PENALTY = config["BVP1_PENALTY"]
-    sigma = config["sigma"]
-    r = config["r"]
+
     # Expiry time data
     expiry_x_tensor, expiry_y_tensor = dataloader.get_expiry_time_tensor(
         N_sample, w_expiry)
@@ -181,7 +179,9 @@ def train_one_epoch_european_1D(model, dataloader, loss_function, optimizer, con
     mse_upper = loss_function(upper_y_tensor, upper_y_pred)
 
     # Loss for boundary conditions
-    loss_boundary = mse_expiry + mse_lower + mse_upper
+    loss_boundary = config["lambda_expiry"] * mse_expiry + \
+        config["lambda_boundary"] * mse_lower + \
+        config["lambda_boundary"] * mse_upper
 
     # Compute the "Black-Scholes loss"
     X1, y1 = dataloader.get_pde_data_tensor(N_sample)
@@ -194,13 +194,13 @@ def train_one_epoch_european_1D(model, dataloader, loss_function, optimizer, con
     loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
 
     # Backpropagate joint loss
-    loss = loss_boundary + pde_learning_rate * loss_pde
+    loss = loss_boundary + config["lambda_pde"] * loss_pde
 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
 
-    loss = loss.to("cpu")
+    loss = loss.to("cpu").detach()
     loss_boundary = loss_boundary.to("cpu").detach()
     loss_pde = loss_pde.to("cpu").detach()
     mse_expiry = mse_expiry.to("cpu").detach()
@@ -214,16 +214,38 @@ def train_one_epoch_european_1D(model, dataloader, loss_function, optimizer, con
     loss_history["loss_lower"].append(mse_lower.item())
     loss_history["loss_upper"].append(mse_upper.item())
 
-    del lower_x_tensor, upper_x_tensor, lower_y_tensor, upper_y_tensor
-    del loss, loss_boundary, loss_pde, y1_hat, X1, y1
-    gc.collect()
-    torch.cuda.empty_cache()
+    if config["epoch"] % config["update_lambda"] == 0:
+        l2_boundary = torch.linalg.vector_norm(
+            mse_lower).item() + torch.linalg.vector_norm(mse_upper).item()
+        l2_expiry = torch.linalg.vector_norm(mse_expiry).item()
+        l2_pde = torch.linalg.vector_norm(loss_pde).item()
+
+        l2_sum = l2_boundary + l2_expiry + l2_pde
+
+        new_lambda_boundary = l2_sum / max(l2_boundary, 1e-6)
+        new_lambda_expiry = l2_sum / max(l2_expiry, 1e-6)
+        new_lambda_pde = l2_sum / max(l2_pde, 1e-6)
+
+        alpha = config["alpha_lambda"]
+        config["lambda_boundary"] = min(alpha *
+                                        config["lambda_boundary"] + (1 - alpha) * new_lambda_boundary, 1000)
+
+        config["lambda_expiry"] = min(alpha *
+                                      config["lambda_expiry"] + (1 - alpha) * new_lambda_expiry, 1000)
+
+        config["lambda_pde"] = min(alpha *
+                                   config["lambda_pde"] + (1 - alpha) * new_lambda_pde, 1000)
+
+        # print(config["lambda_boundary"],
+        #      config["lambda_expiry"], config["lambda_pde"])
 
 
 def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: dict, filename: str, PDE, validation_data: dict = {},
           epochs_before_validation: int = 30):
     optimizer = torch.optim.Adam(
-        model.parameters(), lr=learning_rate, weight_decay=1e-3)
+        model.parameters(), lr=learning_rate, weight_decay=config["weight_decay"])
+
+    scheduler = ExponentialLR(optimizer, config["gamma"])
 
     types_of_loss = ["total_loss", "loss_boundary",
                      "loss_pde", "loss_expiry", "loss_lower", "loss_upper"]
@@ -231,7 +253,7 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
     loss_history_validation = {i: [] for i in types_of_loss}
 
     # BVP1_PENALTY = config["BVP1_PENALTY"]
-    pde_learning_rate = config["pde_learning_rate"]
+    # pde_learning_rate = config["pde_learning_rate"]
 
     loss_function = nn.MSELoss()
     best_validation = float("inf")
@@ -250,11 +272,18 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
     X1_validation = validation_data["X1_validation_scaled"]
     y1_validation = validation_data["y1_validation"]
 
+    config["lambda_pde"] = 1
+    config["lambda_boundary"] = 1
+    config["lambda_expiry"] = 1
+
     for epoch in tqdm(range(1, nr_of_epochs + 1)):
+        config["epoch"] = epoch
+
         model.train(True)
         train_one_epoch_european_1D(
             model, dataloader, loss_function, optimizer, config, loss_history, PDE)
-        # scheduler.step()
+        if epoch % config["scheduler_step"] == 0:
+            scheduler.step()
         model.train(False)
         model.eval()
 
@@ -279,7 +308,7 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
 
             loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
 
-            loss = loss_boundary + pde_learning_rate * loss_pde
+            loss = loss_boundary + loss_pde
 
             loss = loss.to("cpu").detach()
             loss_boundary = loss_boundary.to("cpu").detach()
@@ -301,11 +330,7 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
             if loss.item() < best_validation:
                 best_validation = loss.item()
                 best_validation_epoch = epoch + 1
-                best_model = model.state_dict()
-
-            del loss, mse_upper, mse_lower, mse_expiry, loss_boundary, bs_pde
-            gc.collect()
-            torch.cuda.empty_cache()
+                best_model = copy.deepcopy(model.state_dict())
 
     validation_array = np.zeros(
         (nr_of_epochs // epochs_before_validation, len(types_of_loss)))
@@ -328,10 +353,6 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
     # Load best model based on validation data
     model.load_state_dict(best_model)
 
-    del optimizer
-    gc.collect()
-    torch.cuda.empty_cache()
-
     return best_validation_epoch
 
 
@@ -349,9 +370,10 @@ def try_multiple_activation_functions(config: dict, dataloader, PDE, filename1: 
 
     for i, activation_function in enumerate(activation_functions):
         for j, layer in enumerate(layers):
-            model = PINN(config["N_INPUT"], 1, 400, layer, activation_function)
+            model = PINNforwards(
+                config["N_INPUT"], 1, 256, layer, activation_function)
             model.train(True)
-            epoch = train(model, 20_000, config["learning_rate"], dataloader,
+            epoch = train(model, 100_000, config["learning_rate"], dataloader,
                           config, "", PDE, validation_data)
 
             model.train(False)
@@ -362,11 +384,6 @@ def try_multiple_activation_functions(config: dict, dataloader, PDE, filename1: 
             errors[i, j] = np.sum(
                 (analytical_solution - predicted)**2) / len(analytical_solution)
             epochs[i, j] = epoch
-
-            model.to("cpu")
-            del model
-            gc.collect()
-            torch.cuda.empty_cache()
 
             print("torch.cuda.memory_allocated: %fGB" %
                   (torch.cuda.memory_allocated(0)/1024/1024/1024))
@@ -393,14 +410,14 @@ def try_different_learning_rates(config: dict, dataloader, PDE, filename1: str, 
     epoch_data = np.zeros((len(learning_rates), len(batch_sizes)))
     mse_data = np.zeros((len(learning_rates), len(batch_sizes)))
 
-    model = PINN(config["N_INPUT"], 1, 500, 4)
-    start_model = model.state_dict()
+    model = PINNforwards(config["N_INPUT"], 1, 256, 4)
+    start_model = copy.deepcopy(model.state_dict())
     for i, learning_rate in enumerate(learning_rates):
         for j, batch_size in enumerate(batch_sizes):
             cur_config["N_sample"] = batch_size
             model.load_state_dict(start_model)
             model.train(True)
-            best_epoch = train(model, 20_000, learning_rate, dataloader, cur_config, f"learning_{
+            best_epoch = train(model, 100_000, learning_rate, dataloader, cur_config, f"learning_{
                                learning_rate}_{batch_size}", PDE, validation_data)
 
             model.train(False)
@@ -421,7 +438,6 @@ def try_different_learning_rates(config: dict, dataloader, PDE, filename1: str, 
             print("torch.cuda.max_memory_reserved: %fGB" %
                   (torch.cuda.max_memory_reserved(0)/1024/1024/1024))
 
-    del model
     np.savetxt(filename1, mse_data)
     np.savetxt(filename2, epoch_data)
 
@@ -440,7 +456,7 @@ def try_different_architectures(config: dict, dataloader, PDE, filename1: str, f
 
     for i, layer in enumerate(layers):
         for j, node in enumerate(nodes):
-            model = PINN(config["N_INPUT"], 1, node, layer)
+            model = PINNforwards(config["N_INPUT"], 1, node, layer)
             model.train(True)
             best_epoch = train(
                 model, 25_000, config["learning_rate"], dataloader, config, "", PDE, validation_data)
@@ -477,7 +493,7 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
     for i, seed in enumerate(seeds):
         torch.manual_seed(seed)
         np.random.seed(seed)
-        model = PINN(cur_config["N_INPUT"], 1, nodes, layers)
+        model = PINNforwards(cur_config["N_INPUT"], 1, nodes, layers)
         train(model, nr_of_epochs, config["learning_rate"], dataloader, cur_config, str(
             seed), PDE, validation_data)
 
@@ -491,14 +507,14 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
         os.remove(f"results/validation_{seed}.txt")
 
     np.savetxt("results/" + "average_loss_" +
-               filename, results_train.mean(axis=0))
+               filename + ".txt", results_train.mean(axis=0))
     np.savetxt("results/" + "std_loss_" +
-               filename, results_train.std(axis=0))
+               filename + ".txt", results_train.std(axis=0))
 
     np.savetxt("results/" + "average_validation_" +
-               filename, results_val.mean(axis=0))
+               filename + ".txt", results_val.mean(axis=0))
     np.savetxt("results/" + "std_validation_" +
-               filename, results_val.std(axis=0))
+               filename + ".txt", results_val.std(axis=0))
 
 
 if __name__ == "__main__":
@@ -539,7 +555,7 @@ if __name__ == "__main__":
     # try_multiple_activation_function_european_1D(
     #    config, DataloaderEuropeanMultiDimensional, black_scholes_multi_dimensional, "important_results/mse_data_activation_multi.txt")
 
-    """ model = PINN(2, 1, 300, 5)
+    """ model = PINNforwards(2, 1, 300, 5)
     dataloader = DataloaderAmerican1D([0, 1], [0, 100], 40, 0.04, 0.25, DEVICE)
     validation_data = create_validation_data(dataloader, 2_000, config)
     train(model, 10_000, 1e-4, dataloader, config, "america_test",
@@ -550,7 +566,7 @@ if __name__ == "__main__":
     try_multiple_activation_function_european_1D(
         config, DataloaderEuropean1D, black_scholes_1D, "important_results/different_activation.txt") """
 
-    """ model = PINN(2, 1, 500, 2).to(DEVICE)
+    """ model = PINNforwards(2, 1, 500, 2).to(DEVICE)
     validation_data = create_validation_data(dataloader, 1_000, config)
     train(model, 10_000, 1e-4, dataloader, config,
           "test_analytical", black_scholes_1D, validation_data) """
@@ -558,14 +574,14 @@ if __name__ == "__main__":
     """ for nr_of_layers in [1, 2, 3, 4, 5, 6, 7]:
         for width in [10, 20, 40, 80, 160, 320, 560]:
             filename = f"multi_{nr_of_layers}_{width}"
-            model = PINN(6, 1, width, nr_of_layers).to(DEVICE)
+            model = PINNforwards(6, 1, width, nr_of_layers).to(DEVICE)
             train(model, 30_000, LEARNING_RATE, dataloader, config,
                   filename, black_scholes_multi_dimensional, validation_data) """
 
     """ for N in [100, 500, 1_000, 2_000, 4_000, 8_000, 16_000]:
         config["N_sample"] = N
         filename = f"test_N_{N}"
-        model = PINN(2, 1, HIDDEN_WIDTH, HIDDEN_LAYER).to(DEVICE)
+        model = PINNforwards(2, 1, HIDDEN_WIDTH, HIDDEN_LAYER).to(DEVICE)
         train(model, 30_000, LEARNING_RATE, dataloader,
             config, filename, black_scholes_1D, validation_data) """
 
