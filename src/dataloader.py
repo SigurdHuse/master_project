@@ -5,7 +5,7 @@ import torch
 
 class DataLoaderEuropean(Dataset):
 
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, config: dict):
         super(DataLoaderEuropean, self).__init__()
         self.filename = filename
 
@@ -15,8 +15,9 @@ class DataLoaderEuropean(Dataset):
         return len(self.X)
 
     def __getitem__(self, idx):
-        x = self.X[idx, :-1]
+        x = self.X[idx, :2]
         y = self.X[idx, -1]
+
         return x, y
 
 

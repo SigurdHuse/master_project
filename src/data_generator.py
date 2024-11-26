@@ -1,9 +1,11 @@
 import numpy as np
 import torch
 from scipy.stats import qmc
-
+from tqdm import tqdm
+from torch.distributions import Normal
 
 # TODO write my own American 1D analytical solution
+
 
 class DataGeneratorEuropean1D:
     def __init__(self, time_range, S_range, K: float, r: float, sigma: float, DEVICE, seed: int = 2024):
@@ -94,9 +96,10 @@ class DataGeneratorEuropean1D:
         d2 = d1 - self.sigma * torch.sqrt(t2m)
 
         # Normal cumulative distribution function (CDF)
-        def N0(value): return 0.5 * (1 + torch.erf(value / (2**0.5)))
-        Nd1 = N0(d1)
-        Nd2 = N0(d2)
+        standard_normal = Normal(0, 1)
+
+        Nd1 = standard_normal.cdf(d1)
+        Nd2 = standard_normal.cdf(d2)
 
         # Calculate the option price
         F = S * Nd1 - self.K * Nd2 * torch.exp(-self.r * t2m)
@@ -207,33 +210,42 @@ class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
         # Put option
         return np.fmax(self.K - X, 0)
 
-    def get_boundary_data(self, n, r1=1, r2=1):
+    def get_boundary_data(self, n, w1=1, w2=1):
         T = self.time_range[-1]
-        lower_X = np.concatenate([np.random.uniform(*self.time_range, (int(n*r1), 1)),
-                                  self.S_range[0] * np.ones((int(n*r1), 1))], axis=1)
-        lower_y = self.K * np.ones((int(n*r1), 1))
 
-        upper_X = np.concatenate([np.random.uniform(*self.time_range, (int(r2*n), 1)),
-                                  self.S_range[-1] * np.ones((int(r2*n), 1))], axis=1)
-        upper_y = np.zeros((int(r2*n), 1))
+        lower_sample = self.sampler_1D.random(n=int(n*w1))
+        lower_sample = qmc.scale(
+            lower_sample, [self.time_range[0]], [self.time_range[1]])
+        lower_X = np.concatenate([lower_sample,
+                                  self.S_range[0] * np.ones((int(w1*n), 1))], axis=1)
+
+        lower_y = self.K * np.ones((int(n*w1), 1))
+
+        upper_sample = self.sampler_1D.random(n=int(w2*n))
+        upper_sample = qmc.scale(
+            upper_sample, [self.time_range[0]], [self.time_range[1]])
+
+        upper_X = np.concatenate([upper_sample,
+                                  self.S_range[-1] * np.ones((int(w2*n), 1))], axis=1)
+        upper_y = np.zeros((int(w2*n), 1))
         return lower_X, lower_y, upper_X, upper_y
 
-    def _get_analytical_soln(self, S, t, n=250):
+    def _compute_analytical_solution(self, S, t, n=250):
         T = self.time_range[-1]-t
         delta_t = T / n
-        u = torch.exp(self.sigma * torch.sqrt(delta_t))
+        u = np.exp(self.sigma * np.sqrt(delta_t))
         d = 1 / u
-        p = (torch.exp(self.r * delta_t) - d) / (u - d)
+        p = (np.exp(self.r * delta_t) - d) / (u - d)
         # Initialize option values at maturity
-        option_values = torch.maximum(
-            self.K - S * u**torch.arange(n+1) * d**(n-torch.arange(n+1)), torch.zeros(n+1))
+        option_values = np.maximum(
+            self.K - S * u**np.arange(n+1) * d**(n-np.arange(n+1)), np.zeros(n+1))
         # Backward induction
         for i in range(n-1, -1, -1):
-            option_values = torch.maximum((self.K - S * u**torch.arange(i+1) * d**(i-torch.arange(i+1))),
-                                          torch.exp(-self.r * delta_t) * (p * option_values[:i+1] + (1 - p) * option_values[1:i+2]))
+            option_values = np.maximum((self.K - S * u**np.arange(i+1) * d**(i-np.arange(i+1))),
+                                       np.exp(-self.r * delta_t) * (p * option_values[:i+1] + (1 - p) * option_values[1:i+2]))
         return option_values[0]
 
     def get_analytical_solution(self, S, t, n=250):
-        res = torch.tensor([self._get_analytical_soln(
-            S[i], t[i], n=n) for i in range(len(S))])
+        res = np.array([self._compute_analytical_solution(
+            S[i], t[i], n=n) for i in tqdm(range(len(S)))])
         return res

@@ -27,7 +27,7 @@ def generate_1D_european(nr_of_points: int, config: dict, filename: str):
     solution = solution.cpu().detach().numpy()
     solution = solution.reshape((nr_of_points, 1))
 
-    X_pde = np.concatenate([X_pde_scaled, solution], axis=1)
+    X_pde = np.concatenate([X_pde, solution], axis=1)
 
     np.save("data/" + filename, X_pde)
 
