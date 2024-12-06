@@ -157,8 +157,8 @@ def MASE(target: np.array, prediction: np.array):
     return 100 * MAE / AMD
 
 
-def MSE_numpy(target: np.array, prediction: np.array):
-    return np.square(np.subtract(target.flatten(), prediction.flatten())).mean()
+def RMSE_numpy(target: np.array, prediction: np.array):
+    return np.sqrt(np.square(np.subtract(target.flatten(), prediction.flatten())).mean())
 
 
 def relative_L2_error(target: np.array, prediction: np.array):
@@ -208,13 +208,12 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
     # Compute the "Black-Scholes loss"
     X1, y1 = dataloader.get_pde_data_tensor(N_sample)
 
-    X1 = dataloader.normalize(X1)
-    y1_hat = model(X1)
+    X1_scaled = dataloader.normalize(X1)
+    y1_hat = model(X1_scaled)
 
     bs_pde = PDE(y1_hat, X1, config)
 
     loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
-
     # Backpropagate joint loss
     loss = loss_boundary + config["lambda_pde"] * loss_pde
 
@@ -243,9 +242,9 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
 
         mse_sum = mse_boundary + mse_expiry.item() + loss_pde.item()
 
-        new_lambda_boundary = mse_boundary / max(mse_sum, 1e-6) * 100
-        new_lambda_expiry = mse_expiry.item() / max(mse_sum, 1e-6) * 100
-        new_lambda_pde = loss_pde.item() / max(mse_sum, 1e-6) * 100
+        new_lambda_boundary = mse_boundary / max(mse_sum, 1e-6)
+        new_lambda_expiry = mse_expiry.item() / max(mse_sum, 1e-6)
+        new_lambda_pde = loss_pde.item() / max(mse_sum, 1e-6)
 
         alpha = config["alpha_lambda"]
         config["lambda_boundary"] = alpha * \
@@ -263,6 +262,11 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
 
 def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: dict, filename: str, PDE, validation_data: dict = {},
           epochs_before_validation: int = 30):
+
+    config["lambda_pde"] = 1
+    config["lambda_boundary"] = 1
+    config["lambda_expiry"] = 1
+
     optimizer = torch.optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=config["weight_decay"])
 
@@ -290,12 +294,9 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
     upper_x_tensor_validation = validation_data["upper_x_tensor_validation_scaled"]
     upper_y_tensor_validation = validation_data["upper_y_tensor_validation"]
 
-    X1_validation = validation_data["X1_validation_scaled"]
+    X1_validation = validation_data["X1_validation"]
+    X1_validation_scaled = validation_data["X1_validation_scaled"]
     y1_validation = validation_data["y1_validation"]
-
-    config["lambda_pde"] = 1
-    config["lambda_boundary"] = 1
-    config["lambda_expiry"] = 1
 
     for epoch in tqdm(range(1, nr_of_epochs + 1), miniters=1_000, maxinterval=1_000):
         config["epoch"] = epoch
@@ -325,7 +326,7 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
                 # We have to divide by 2 to get the MSE of the boundary condition
                 loss_boundary = mse_expiry + (mse_lower + mse_upper)/2
 
-            y1_hat = model(X1_validation)
+            y1_hat = model(X1_validation_scaled)
             bs_pde = PDE(y1_hat, X1_validation, config)
 
             loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
@@ -408,7 +409,7 @@ def try_multiple_activation_functions(config: dict, dataloader, PDE, filename1: 
 
     analytical_solution = analytical_solution.reshape(
         analytical_solution.shape[0], -1)
-    errors = np.zeros((len(activation_functions), len(layers)))
+    mse_data = np.zeros((len(activation_functions), len(layers)))
     used_epochs = np.zeros((len(activation_functions), len(layers)))
 
     MSE = nn.MSELoss()
@@ -429,18 +430,32 @@ def try_multiple_activation_functions(config: dict, dataloader, PDE, filename1: 
                 predicted_lower = model(lower_x_tensor_test)
                 predicted_upper = model(upper_x_tensor_test)
 
-            errors[i, j] = np.square(np.subtract(
-                analytical_solution, predicted_pde)).mean()
-            errors[i, j] += MSE(expiry_y_tensor_test, predicted_expiry).item()
-            errors[i, j] += (MSE(lower_y_tensor_test, predicted_lower).item() +
-                             MSE(upper_y_tensor_test, predicted_upper).item())/2
+            total_number_of_elements = 0
+            mse_data[i, j] = np.square(np.subtract(
+                analytical_solution, predicted_pde)).mean() * analytical_solution.size
+            total_number_of_elements += analytical_solution.size
+
+            mse_data[i, j] += MSE(expiry_y_tensor_test,
+                                  predicted_expiry).item() * torch.numel(predicted_expiry)
+            total_number_of_elements += torch.numel(predicted_expiry)
+
+            mse_data[i, j] += MSE(lower_y_tensor_test,
+                                  predicted_lower).item()*torch.numel(predicted_lower)
+            total_number_of_elements += torch.numel(predicted_lower)
+
+            mse_data[i, j] += MSE(upper_y_tensor_test,
+                                  predicted_upper).item() * torch.numel(predicted_upper)
+            total_number_of_elements += torch.numel(predicted_upper)
+
+            mse_data[i, j] /= total_number_of_elements
+            mse_data[i, j] = np.sqrt(mse_data[i, j])
 
             used_epochs[i, j] = epoch
 
             print(f"Trial {j + i*len(layers) + 1} / {len(layers)
                   * len(activation_functions)} Done")
-
-    np.savetxt(filename1, errors)
+            print("RMSE", mse_data[i, j])
+    np.savetxt(filename1, mse_data)
     np.savetxt(filename2, used_epochs)
 
 
@@ -492,17 +507,31 @@ def try_different_learning_rates(config: dict, dataloader, PDE, filename1: str, 
                 predicted_lower = model(lower_x_tensor_test)
                 predicted_upper = model(upper_x_tensor_test)
 
+            total_number_of_elements = 0
             mse_data[i, j] = np.square(np.subtract(
-                analytical_solution, predicted_pde)).mean()
+                analytical_solution, predicted_pde)).mean() * analytical_solution.size
+            total_number_of_elements += analytical_solution.size
+
             mse_data[i, j] += MSE(expiry_y_tensor_test,
-                                  predicted_expiry).item()
-            mse_data[i, j] += (MSE(lower_y_tensor_test, predicted_lower).item() +
-                               MSE(upper_y_tensor_test, predicted_upper).item())/2
+                                  predicted_expiry).item() * torch.numel(predicted_expiry)
+            total_number_of_elements += torch.numel(predicted_expiry)
+
+            mse_data[i, j] += MSE(lower_y_tensor_test,
+                                  predicted_lower).item()*torch.numel(predicted_lower)
+            total_number_of_elements += torch.numel(predicted_lower)
+
+            mse_data[i, j] += MSE(upper_y_tensor_test,
+                                  predicted_upper).item() * torch.numel(predicted_upper)
+            total_number_of_elements += torch.numel(predicted_upper)
+
+            mse_data[i, j] /= total_number_of_elements
+            mse_data[i, j] = np.sqrt(mse_data[i, j])
 
             epoch_data[i, j] = best_epoch
 
             print(f"Trial {j + i*len(batch_sizes) +
                   1} / {len(batch_sizes)*len(learning_rates)} Done")
+            print("RMSE", mse_data[i, j])
     np.savetxt(filename1, mse_data)
     np.savetxt(filename2, epoch_data)
 
@@ -550,17 +579,31 @@ def try_different_architectures(config: dict, dataloader, PDE, filename1: str, f
                 predicted_lower = model(lower_x_tensor_test)
                 predicted_upper = model(upper_x_tensor_test)
 
+            total_number_of_elements = 0
             mse_data[i, j] = np.square(np.subtract(
-                analytical_solution, predicted_pde)).mean()
+                analytical_solution, predicted_pde)).mean() * analytical_solution.size
+            total_number_of_elements += analytical_solution.size
+
             mse_data[i, j] += MSE(expiry_y_tensor_test,
-                                  predicted_expiry).item()
-            mse_data[i, j] += (MSE(lower_y_tensor_test, predicted_lower).item() +
-                               MSE(upper_y_tensor_test, predicted_upper).item())/2
+                                  predicted_expiry).item() * torch.numel(predicted_expiry)
+            total_number_of_elements += torch.numel(predicted_expiry)
+
+            mse_data[i, j] += MSE(lower_y_tensor_test,
+                                  predicted_lower).item()*torch.numel(predicted_lower)
+            total_number_of_elements += torch.numel(predicted_lower)
+
+            mse_data[i, j] += MSE(upper_y_tensor_test,
+                                  predicted_upper).item() * torch.numel(predicted_upper)
+            total_number_of_elements += torch.numel(predicted_upper)
+
+            mse_data[i, j] /= total_number_of_elements
+            mse_data[i, j] = np.sqrt(mse_data[i, j])
 
             epoch_data[i, j] = best_epoch
 
             print(f"Trial {j + i*len(nodes) +
                   1} / {len(layers)*len(nodes)} Done")
+            print("RMSE", mse_data[i, j])
 
     np.savetxt(filename1, mse_data)
     np.savetxt(filename2, epoch_data)
@@ -652,7 +695,7 @@ def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validatio
     # model.train(True)
     # best_epoch = train(
     #    model, epochs, config["learning_rate"], dataloader, config, "greeks", PDE, validation_data)
-
+    best_epoch = 399720
     model.train(False)
     model.eval()
 
@@ -675,16 +718,16 @@ def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validatio
     # print(np.min(analytical_delta), np.min(analytical_gamma), np.min(analytical_theta), np.min(analytical_nu), np.min(analytical_rho))
 
     with open(filename, 'w') as outfile:
-        # outfile.write(f"EPOCHS : {best_epoch}\n")
-        outfile.write(f"DELTA  : {relative_L2_error(
+        outfile.write(f"EPOCHS : {best_epoch}\n")
+        outfile.write(f"DELTA  : {RMSE_numpy(
             analytical_delta, delta):.2e} \n")
-        outfile.write(f"GAMMA  : {relative_L2_error(
+        outfile.write(f"GAMMA  : {RMSE_numpy(
             analytical_gamma, gamma):.2e} \n")
-        outfile.write(f"THETA  : {relative_L2_error(
+        outfile.write(f"THETA  : {RMSE_numpy(
             analytical_theta, theta):.2e} \n")
         outfile.write(
-            f"NU     : {relative_L2_error(analytical_nu, nu):.2e} \n")
-        outfile.write(f"RHO    : {relative_L2_error(analytical_rho, rho):.2e}")
+            f"NU     : {RMSE_numpy(analytical_nu, nu):.2e} \n")
+        outfile.write(f"RHO    : {RMSE_numpy(analytical_rho, rho):.2e}")
 
 
 if __name__ == "__main__":

@@ -63,7 +63,7 @@ class PINNforwards(nn.Module):
         return delta, gamma, theta, nu, rho
 
 
-class PINNbackwards(PINNforwards):
+""" class PINNbackwards(PINNforwards):
     def __init__(self, N_INPUT, N_OUTPUT, N_HIDDEN, N_LAYERS, activation_function=nn.Tanh, initial_sigma=0.1):
         super(PINNbackwards, self).__init__(N_INPUT, N_OUTPUT, N_HIDDEN,
                                             N_LAYERS, activation_function)
@@ -72,6 +72,7 @@ class PINNbackwards(PINNforwards):
 
     def foward_with_european_1D(self, X_scaled: torch.tensor, X: torch.tensor, r: float):
         y1_hat = super().forward(X_scaled)
+        prediction = super().forward(X_scaled)
 
         grads = torch.autograd.grad(y1_hat, X, grad_outputs=torch.ones(y1_hat.shape).to(
             DEVICE), retain_graph=True, create_graph=True, only_inputs=True)[0]
@@ -84,7 +85,7 @@ class PINNbackwards(PINNforwards):
         S1 = X[:, 1].view(-1, 1)
 
         dt_term = dVdt
-        sigma_term = 0.5*(self.sigma * self.sigma) * (S1 * S1) * d2VdS2 / 100
+        sigma_term = 0.5*(self.sigma * self.sigma) * (S1 * S1) * d2VdS2
         ds_term = r * S1 * dVdS
         y1_hat_term = r * y1_hat
 
@@ -93,4 +94,5 @@ class PINNbackwards(PINNforwards):
         # print(nn.MSELoss()(sigma_term, torch.zeros_like(sigma_term)))
         # print(ds_term + dt_term + y1_hat_term)
         # print("Sigma term", d2VdS2)
-        return y1_hat, bs_pde
+        return prediction, bs_pde
+ """
