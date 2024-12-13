@@ -641,6 +641,7 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
         os.remove(f"results/loss_{seed}.npy")
         os.remove(f"results/validation_{seed}.npy")
         os.remove(f"results/lambda_values_{seed}.npy")
+        print(f"Run {i} / {len(seeds)} done \n")
 
     np.save("results/average_loss_" +
             filename, np.vstack([results_train.mean(axis=0), results_train.std(axis=0)]))
@@ -728,6 +729,81 @@ def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validatio
         outfile.write(
             f"NU     : {RMSE_numpy(analytical_nu, nu):.2e} \n")
         outfile.write(f"RHO    : {RMSE_numpy(analytical_rho, rho):.2e}")
+
+
+def trying_weight_decay(config: dict, dataloader, PDE, filename1: str, filename2: str, weight_decays: list, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 250_000):
+    cur_config = copy.deepcopy(config)
+
+    X1_test = test_data["X1_validation"]
+    X1_test_scaled = test_data["X1_validation_scaled"]
+
+    expiry_x_tensor_test = test_data["expiry_x_tensor_validation_scaled"]
+    expiry_y_tensor_test = test_data["expiry_y_tensor_validation"]
+
+    lower_x_tensor_test = test_data["lower_x_tensor_validation_scaled"]
+    lower_y_tensor_test = test_data["lower_y_tensor_validation"]
+
+    upper_x_tensor_test = test_data["upper_x_tensor_validation_scaled"]
+    upper_y_tensor_test = test_data["upper_y_tensor_validation"]
+
+    if analytical_solution_filename is None:
+        analytical_solution = dataloader.get_analytical_solution(
+            X1_test[:, 1], X1_test[:, 0]).cpu().detach().numpy()
+    else:
+        analytical_solution = np.load(analytical_solution_filename)
+
+    analytical_solution = analytical_solution.reshape(
+        analytical_solution.shape[0], -1)
+
+    epoch_data = np.zeros((1, len(weight_decays)))
+    mse_data = np.zeros((1, len(weight_decays)))
+
+    model = PINNforwards(config["N_INPUT"], 1, 256, 4)
+    start_model = copy.deepcopy(model.state_dict())
+
+    MSE = nn.MSELoss()
+    for i, weight_decay in enumerate(weight_decays):
+        cur_config["weight_decay"] = weight_decay
+        model.load_state_dict(start_model)
+        model.train(True)
+        best_epoch = train(model, epochs, config["learning_rate"], dataloader, cur_config, f"wd_{
+                           weight_decay}", PDE, validation_data)
+
+        model.train(False)
+        model.eval()
+
+        with torch.no_grad():
+            predicted_pde = model(X1_test_scaled).cpu().detach().numpy()
+            predicted_expiry = model(expiry_x_tensor_test)
+            predicted_lower = model(lower_x_tensor_test)
+            predicted_upper = model(upper_x_tensor_test)
+
+        total_number_of_elements = 0
+        mse_data[0, i] = np.square(np.subtract(
+            analytical_solution, predicted_pde)).mean() * analytical_solution.size
+        total_number_of_elements += analytical_solution.size
+
+        mse_data[0, i] += MSE(expiry_y_tensor_test,
+                              predicted_expiry).item() * torch.numel(predicted_expiry)
+        total_number_of_elements += torch.numel(predicted_expiry)
+
+        mse_data[0, i] += MSE(lower_y_tensor_test,
+                              predicted_lower).item()*torch.numel(predicted_lower)
+        total_number_of_elements += torch.numel(predicted_lower)
+
+        mse_data[0, i] += MSE(upper_y_tensor_test,
+                              predicted_upper).item() * torch.numel(predicted_upper)
+        total_number_of_elements += torch.numel(predicted_upper)
+
+        mse_data[0, i] /= total_number_of_elements
+        mse_data[0, i] = np.sqrt(mse_data[0, i])
+
+        epoch_data[0, i] = best_epoch
+
+        print(f"Trial {i} /  {len(weight_decays)} Done")
+        print("RMSE", mse_data[0, i])
+    np.savetxt(filename1, mse_data)
+    np.savetxt(filename2, epoch_data)
 
 
 if __name__ == "__main__":
