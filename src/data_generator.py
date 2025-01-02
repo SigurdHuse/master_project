@@ -24,10 +24,8 @@ class DataGeneratorEuropean1D:
 
     def get_pde_data(self, n):
         X = self.sampler_2D.random(n=n)
-        # X = qmc.scale(sample, [self.time_range[0], self.S_range[0]], [
-        #              self.time_range[1], self.S_range[1]])
-        # X = np.concatenate([np.random.uniform(*self.time_range, (n, 1)),
-        #                    np.random.uniform(*self.S_range, (n, 1)) + 1e-7], axis=1)
+        X = qmc.scale(X, [self.time_range[0], self.S_range[0]], [
+                      self.time_range[1], self.S_range[1]])
         y = np.zeros((n, 1))  # price
         return X, y
 
@@ -39,10 +37,9 @@ class DataGeneratorEuropean1D:
 
     def get_expiry_time_data(self, n, w=1):
         sample = self.sampler_1D.random(n=int(w*n))
-        # sample = qmc.scale(sample, [self.S_range[0]], [self.S_range[1]])
-        # X = np.concatenate([np.ones((int(r*n), self.time_range[1])),  # all at expiry time
-        #                    np.random.uniform(*self.S_range, (int(r*n), 1)) + 1e-7], axis=1)
-        X = np.concatenate([np.ones((int(w*n), self.time_range[1])),  # all at expiry time
+        sample = qmc.scale(sample, [self.S_range[0]], [self.S_range[1]])
+
+        X = np.concatenate([np.ones((int(w*n), 1))*self.time_range[1],  # all at expiry time
                             sample], axis=1)
         y = self.option_function(X[:, 1]).reshape(-1, 1)
 
@@ -57,24 +54,21 @@ class DataGeneratorEuropean1D:
     def get_boundary_data(self, n, w1=1, w2=1):
         T = self.time_range[-1]
         lower_sample = self.sampler_1D.random(n=int(n*w1))
-        # lower_sample = qmc.scale(
-        #    lower_sample, [self.time_range[0]], [self.time_range[1]])
-        # lower_X = np.concatenate([np.random.uniform(*self.time_range, (int(n*r1), 1)),
-        #                          self.S_range[0] * np.ones((int(n*r1), 1))], axis=1)
+        lower_sample = qmc.scale(
+            lower_sample, [self.time_range[0]], [self.time_range[1]])
+
         lower_X = np.concatenate([lower_sample,
                                   self.S_range[0] * np.ones((int(w1*n), 1))], axis=1)
         lower_y = np.zeros((int(w1*n), 1))
 
         upper_sample = self.sampler_1D.random(n=int(w2*n))
-        # upper_sample = qmc.scale(
-        #    upper_sample, [self.time_range[0]], [self.time_range[1]])
+        upper_sample = qmc.scale(
+            upper_sample, [self.time_range[0]], [self.time_range[1]])
 
-        # upper_X = np.concatenate([np.random.uniform(*self.time_range, (int(r2*n), 1)),
-        #                          self.S_range[-1] * np.ones((int(r2*n), 1))], axis=1)
         upper_X = np.concatenate([upper_sample,
                                   self.S_range[-1] * np.ones((int(w2*n), 1))], axis=1)
-        upper_y = (self.S_range[-1] - self.K*np.exp(-self.r *
-                                                    (T-upper_X[:, 0].reshape(-1)))).reshape(-1, 1)
+        upper_y = self.S_range[-1] - self.K * \
+            np.exp(-self.r * (T-upper_X[:, 0].reshape(-1))).reshape(-1, 1)
 
         return lower_X, lower_y, upper_X, upper_y
 
@@ -214,16 +208,17 @@ class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
         T = self.time_range[-1]
 
         lower_sample = self.sampler_1D.random(n=int(n*w1))
-        # lower_sample = qmc.scale(
-        #    lower_sample, [self.time_range[0]], [self.time_range[1]])
+        lower_sample = qmc.scale(
+            lower_sample, [self.time_range[0]], [self.time_range[1]])
         lower_X = np.concatenate([lower_sample,
                                   self.S_range[0] * np.ones((int(w1*n), 1))], axis=1)
 
-        lower_y = self.K * np.ones((int(n*w1), 1))
+        lower_y = self.K * np.ones((int(n*w1), 1)) * \
+            np.exp(- self.r * (T - lower_X[:, 0]))
 
         upper_sample = self.sampler_1D.random(n=int(w2*n))
-        # upper_sample = qmc.scale(
-        #    upper_sample, [self.time_range[0]], [self.time_range[1]])
+        upper_sample = qmc.scale(
+            upper_sample, [self.time_range[0]], [self.time_range[1]])
 
         upper_X = np.concatenate([upper_sample,
                                   self.S_range[-1] * np.ones((int(w2*n), 1))], axis=1)

@@ -3,6 +3,9 @@
 
 ### LaTeX ###
 ## Core latex/pdflatex auxiliary files:
+*.pth
+*.npy
+
 *.aux
 *.lof
 *.log

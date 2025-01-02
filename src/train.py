@@ -201,7 +201,7 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
     mse_upper = loss_function(upper_y_tensor, upper_y_pred)
 
     # Loss for boundary conditions
-    # We have to divide by 2 to get the MSE of the boundary condition
+    # We have to divide by 2 to get the MSE of the boundary condition as we both upper and lower
     loss_boundary = config["lambda_expiry"] * mse_expiry + \
         config["lambda_boundary"] * (mse_lower + mse_upper)/2
 
@@ -209,6 +209,7 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
     X1, y1 = dataloader.get_pde_data_tensor(N_sample)
 
     X1_scaled = dataloader.normalize(X1)
+
     y1_hat = model(X1_scaled)
 
     bs_pde = PDE(y1_hat, X1, config)
@@ -236,7 +237,7 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
     loss_history["loss_lower"].append(mse_lower.item())
     loss_history["loss_upper"].append(mse_upper.item())
 
-    if config["epoch"] % config["update_lambda"] == 0:
+    """ if config["epoch"] % config["update_lambda"] == 0:
         # We have to divide by 2 to get the MSE of the boundary condition
         mse_boundary = (mse_lower.item() + mse_upper.item())/2
 
@@ -257,15 +258,14 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
             config["lambda_pde"] + (1 - alpha) * new_lambda_pde
 
         for lambda_name in ["lambda_pde", "lambda_boundary", "lambda_expiry"]:
-            loss_history[lambda_name].append(config[lambda_name])
+            loss_history[lambda_name].append(config[lambda_name]) """
 
 
-def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: dict, filename: str, PDE, validation_data: dict = {},
-          epochs_before_validation: int = 30):
-
-    config["lambda_pde"] = 1
-    config["lambda_boundary"] = 1
-    config["lambda_expiry"] = 1
+def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: dict, filename: str, PDE, validation_data: dict = {}):
+    epochs_before_validation = config["epochs_before_validation"]
+    # config["lambda_pde"] = 1
+    # config["lambda_boundary"] = 1
+    # config["lambda_expiry"] = 1
 
     optimizer = torch.optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=config["weight_decay"])
@@ -276,9 +276,6 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
                      "loss_pde", "loss_expiry", "loss_lower", "loss_upper"]
     loss_history = {i: [] for i in types_of_loss}
     loss_history_validation = {i: [] for i in types_of_loss}
-
-    for lambda_name in ["lambda_pde", "lambda_boundary", "lambda_expiry"]:
-        loss_history[lambda_name] = [config[lambda_name]]
 
     loss_function = nn.MSELoss()
     best_validation = float("inf")
@@ -363,20 +360,15 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
         (nr_of_epochs // epochs_before_validation, len(types_of_loss)))
     loss_array = np.zeros(
         (nr_of_epochs, len(types_of_loss)))
-    lambda_values = np.zeros((nr_of_epochs // config["update_lambda"] + 1, 3))
 
     for i, name in enumerate(types_of_loss):
         validation_array[:, i] = loss_history_validation[name]
         loss_array[:, i] = loss_history[name]
 
-    for i, lambda_name in enumerate(["lambda_pde", "lambda_boundary", "lambda_expiry"]):
-        lambda_values[:, i] = loss_history[lambda_name]
-
     if config["save_loss"]:
         np.save("results/loss_" + filename, loss_array)
         np.save("results/validation_" +
                 filename, validation_array)
-        np.save("results/lambda_values_" + filename, lambda_values)
 
     if config["save_model"]:
         torch.save(
@@ -610,15 +602,41 @@ def try_different_architectures(config: dict, dataloader, PDE, filename1: str, f
 
 
 def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filename: str,
-                         nr_of_epochs: int, dataloader, config: dict, validation_data: dict):
+                         nr_of_epochs: int, dataloader, config: dict, validation_data: dict, test_data: dict, analytical_solution_filename: str = None):
     cur_config = config.copy()
     cur_config["save_loss"] = True
 
-    results_train = np.zeros((len(seeds), nr_of_epochs))
-    results_val = np.zeros((len(seeds), nr_of_epochs // 30))
-    results_lambda_pde = np.zeros((len(seeds), nr_of_epochs // 500 + 1))
-    results_lambda_boundary = np.zeros((len(seeds), nr_of_epochs // 500 + 1))
-    results_lambda_expiry = np.zeros((len(seeds), nr_of_epochs // 500 + 1))
+    types_of_loss = ["total_loss", "loss_boundary",
+                     "loss_pde", "loss_expiry", "loss_lower", "loss_upper"]
+
+    results_train = np.zeros((len(seeds), nr_of_epochs, len(types_of_loss)))
+    results_val = np.zeros(
+        (len(seeds), nr_of_epochs // config["epochs_before_validation"], len(types_of_loss)))
+
+    mse_data = np.zeros(len(seeds))
+
+    X1_test = test_data["X1_validation"]
+    X1_test_scaled = test_data["X1_validation_scaled"]
+
+    expiry_x_tensor_test = test_data["expiry_x_tensor_validation_scaled"]
+    expiry_y_tensor_test = test_data["expiry_y_tensor_validation"]
+
+    lower_x_tensor_test = test_data["lower_x_tensor_validation_scaled"]
+    lower_y_tensor_test = test_data["lower_y_tensor_validation"]
+
+    upper_x_tensor_test = test_data["upper_x_tensor_validation_scaled"]
+    upper_y_tensor_test = test_data["upper_y_tensor_validation"]
+
+    if analytical_solution_filename is None:
+        analytical_solution = dataloader.get_analytical_solution(
+            X1_test[:, 1], X1_test[:, 0]).cpu().detach().numpy()
+    else:
+        analytical_solution = np.load(analytical_solution_filename)
+
+    analytical_solution = analytical_solution.reshape(
+        analytical_solution.shape[0], -1)
+
+    MSE = nn.MSELoss()
 
     for i, seed in enumerate(seeds):
         torch.manual_seed(seed)
@@ -630,17 +648,41 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
 
         cur_train = np.load(f"results/loss_{seed}.npy")
         cur_val = np.load(f"results/validation_{seed}.npy")
-        cur_lambda = np.load(f"results/lambda_values_{seed}.npy")
 
-        results_train[i] = cur_train[:, 0]
-        results_val[i] = cur_val[:, 0]
-        results_lambda_pde[i] = cur_lambda[:, 0]
-        results_lambda_boundary[i] = cur_lambda[:, 1]
-        results_lambda_expiry[i] = cur_lambda[:, 2]
+        results_train[i] = cur_train
+        results_val[i] = cur_val
+
+        model.train(False)
+        model.eval()
+
+        with torch.no_grad():
+            predicted_pde = model(X1_test_scaled).cpu().detach().numpy()
+            predicted_expiry = model(expiry_x_tensor_test)
+            predicted_lower = model(lower_x_tensor_test)
+            predicted_upper = model(upper_x_tensor_test)
+
+        total_number_of_elements = 0
+        mse_data[i] = np.square(np.subtract(
+            analytical_solution, predicted_pde)).mean() * analytical_solution.size
+        total_number_of_elements += analytical_solution.size
+
+        mse_data[i] += MSE(expiry_y_tensor_test,
+                           predicted_expiry).item() * torch.numel(predicted_expiry)
+        total_number_of_elements += torch.numel(predicted_expiry)
+
+        mse_data[i] += MSE(lower_y_tensor_test,
+                           predicted_lower).item()*torch.numel(predicted_lower)
+        total_number_of_elements += torch.numel(predicted_lower)
+
+        mse_data[i] += MSE(upper_y_tensor_test,
+                           predicted_upper).item() * torch.numel(predicted_upper)
+        total_number_of_elements += torch.numel(predicted_upper)
+
+        mse_data[i] /= total_number_of_elements
+        mse_data[i] = np.sqrt(mse_data[i])
 
         os.remove(f"results/loss_{seed}.npy")
         os.remove(f"results/validation_{seed}.npy")
-        os.remove(f"results/lambda_values_{seed}.npy")
         print(f"Run {i} / {len(seeds)} done \n")
 
     np.save("results/average_loss_" +
@@ -648,14 +690,7 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
 
     np.save("results/average_validation_" +
             filename, np.vstack([results_val.mean(axis=0), results_val.std(axis=0)]))
-
-    final_lambdas_mean = np.vstack([results_lambda_pde.mean(
-        axis=0), results_lambda_boundary.mean(axis=0), results_lambda_expiry.mean(axis=0)])
-    final_lambdas_std = np.vstack([results_lambda_pde.std(
-        axis=0), results_lambda_boundary.std(axis=0), results_lambda_expiry.std(axis=0)])
-    final_lambdas = np.vstack([final_lambdas_mean, final_lambdas_std])
-
-    np.save("results/average_lambdas_" + filename, final_lambdas)
+    np.savetxt("results/mse_data_" + filename + ".txt", mse_data)
 
 
 def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validation_data: dict, test_data: dict, epochs: int = 250_000):
@@ -693,13 +728,11 @@ def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validatio
 
     model = PINNforwards(config["N_INPUT"], 1, 256, 4)
     model.load_state_dict(torch.load("models/greeks.pth", weights_only=True))
-    # model.train(True)
-    # best_epoch = train(
-    #    model, epochs, config["learning_rate"], dataloader, config, "greeks", PDE, validation_data)
-    best_epoch = 399720
+    model.train(True)
+    best_epoch = train(
+        model, epochs, config["learning_rate"], dataloader, config, "greeks", PDE, validation_data)
     model.train(False)
     model.eval()
-
     # print(analytical_delta.shape, analytical_gamma.shape, analytical_rho.shape, analytical_theta.shape, analytical_nu.shape)
     delta, gamma, theta, nu, rho = model.estimate_greeks_call(
         X1_test_scaled, X1_test, sigma, T)
@@ -710,11 +743,11 @@ def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validatio
     nu = nu.cpu().detach().numpy()
     rho = rho.cpu().detach().numpy()
 
-    plt.plot(rho.flatten())
+    """ plt.plot(rho.flatten())
     plt.savefig("plots/pred_rho.png")
     plt.clf()
     plt.plot(analytical_rho.flatten())
-    plt.savefig("plots/rho.png")
+    plt.savefig("plots/rho.png") """
     # print(np.max(analytical_delta), np.max(analytical_gamma), np.max(analytical_theta), np.max(analytical_nu), np.max(analytical_rho))
     # print(np.min(analytical_delta), np.min(analytical_gamma), np.min(analytical_theta), np.min(analytical_nu), np.min(analytical_rho))
 
@@ -802,6 +835,85 @@ def trying_weight_decay(config: dict, dataloader, PDE, filename1: str, filename2
 
         print(f"Trial {i} /  {len(weight_decays)} Done")
         print("RMSE", mse_data[0, i])
+    np.savetxt(filename1, mse_data)
+    np.savetxt(filename2, epoch_data)
+
+
+def try_different_lambdas(config: dict, dataloader, PDE, filename1: str, filename2: str, lambdas: list[list[float]], validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 600_000):
+    cur_config = copy.deepcopy(config)
+
+    X1_test = test_data["X1_validation"]
+    X1_test_scaled = test_data["X1_validation_scaled"]
+
+    expiry_x_tensor_test = test_data["expiry_x_tensor_validation_scaled"]
+    expiry_y_tensor_test = test_data["expiry_y_tensor_validation"]
+
+    lower_x_tensor_test = test_data["lower_x_tensor_validation_scaled"]
+    lower_y_tensor_test = test_data["lower_y_tensor_validation"]
+
+    upper_x_tensor_test = test_data["upper_x_tensor_validation_scaled"]
+    upper_y_tensor_test = test_data["upper_y_tensor_validation"]
+
+    if analytical_solution_filename is None:
+        analytical_solution = dataloader.get_analytical_solution(
+            X1_test[:, 1], X1_test[:, 0]).cpu().detach().numpy()
+    else:
+        analytical_solution = np.load(analytical_solution_filename)
+
+    analytical_solution = analytical_solution.reshape(
+        analytical_solution.shape[0], -1)
+
+    epoch_data = np.zeros(len(lambdas))
+    mse_data = np.zeros(len(lambdas))
+
+    model = PINNforwards(config["N_INPUT"], 1, 256, 4)
+    start_model = copy.deepcopy(model.state_dict())
+
+    MSE = nn.MSELoss()
+    for i, cur in enumerate(lambdas):
+
+        config["lambda_pde"] = cur[0]
+        config["lambda_boundary"] = cur[1]
+        config["lambda_expiry"] = cur[2]
+
+        model.load_state_dict(start_model)
+        model.train(True)
+        best_epoch = train(
+            model, epochs, cur_config["learning_rate"], dataloader, cur_config, "", PDE, validation_data)
+
+        model.train(False)
+        model.eval()
+
+        with torch.no_grad():
+            predicted_pde = model(X1_test_scaled).cpu().detach().numpy()
+            predicted_expiry = model(expiry_x_tensor_test)
+            predicted_lower = model(lower_x_tensor_test)
+            predicted_upper = model(upper_x_tensor_test)
+
+        total_number_of_elements = 0
+        mse_data[i] = np.square(np.subtract(
+            analytical_solution, predicted_pde)).mean() * analytical_solution.size
+        total_number_of_elements += analytical_solution.size
+
+        mse_data[i] += MSE(expiry_y_tensor_test,
+                           predicted_expiry).item() * torch.numel(predicted_expiry)
+        total_number_of_elements += torch.numel(predicted_expiry)
+
+        mse_data[i] += MSE(lower_y_tensor_test,
+                           predicted_lower).item()*torch.numel(predicted_lower)
+        total_number_of_elements += torch.numel(predicted_lower)
+
+        mse_data[i] += MSE(upper_y_tensor_test,
+                           predicted_upper).item() * torch.numel(predicted_upper)
+        total_number_of_elements += torch.numel(predicted_upper)
+
+        mse_data[i] /= total_number_of_elements
+        mse_data[i] = np.sqrt(mse_data[i])
+
+        epoch_data[i] = best_epoch
+
+        print(f"Trial {i} Done")
+        print("RMSE", mse_data[i])
     np.savetxt(filename1, mse_data)
     np.savetxt(filename2, epoch_data)
 
