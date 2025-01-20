@@ -1,7 +1,7 @@
 from train import black_scholes_1D, DEVICE
 from train import try_multiple_activation_functions, try_different_learning_rates, try_different_architectures
 from train import train_multiple_times, create_validation_data
-from train import train, computing_the_greeks, trying_weight_decay, try_different_lambdas
+from train import train, computing_the_greeks, trying_weight_decay, try_different_lambdas, compute_test_loss
 from data_generator import DataGeneratorEuropean1D
 from PINN import PINNforwards
 
@@ -22,13 +22,13 @@ config["w_upper"] = 1
 
 config["weight_decay"] = 0
 config["gamma"] = 0.99
-config["scheduler_step"] = 500
+config["scheduler_step"] = 1_000
 
-config["N_sample"] = 64
+config["N_sample"] = 1024
 config["lambda_pde"] = 1
 config["lambda_boundary"] = 1
 config["lambda_expiry"] = 1
-# config["update_lambda"] = 1_000_000
+# config["update_lambda"] = 500
 # config["alpha_lambda"] = 0.9
 
 config["K"] = 40
@@ -37,11 +37,14 @@ config["S_range"] = [0, 400]
 config["sigma"] = 0.5
 config["r"] = 0.04
 
-config["learning_rate"] = 1e-3
+config["learning_rate"] = 7e-4
 config["save_model"] = False
 config["save_loss"] = False
 config["N_INPUT"] = 2
 config["epochs_before_validation"] = 30
+
+config["epochs_before_validation_loss_saved"] = config["epochs_before_validation"]
+config["epochs_before_loss_saved"] = 1
 
 dataloader = DataGeneratorEuropean1D(
     time_range=config["t_range"], S_range=config["S_range"], K=config["K"], r=config["r"], sigma=config["sigma"], DEVICE=DEVICE)
@@ -57,27 +60,37 @@ test_data = create_validation_data(
 train(model, 10_000, config["learning_rate"], dataloader,
       config, "test", black_scholes_1D, validation_data) """
 
+""" torch.manual_seed(2025)
+np.random.seed(2025)
+try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
+                             filename1="important_results/european_1D/MSE_test_scaled.txt", filename2="important_results/european_1D/epoch_test_scaled.txt",
+                             learning_rates=[1e-3], batch_sizes=[128],
+                             validation_data=validation_data, test_data=test_data, epochs=500_000) """
+
+
+""" torch.manual_seed(2025)
+np.random.seed(2025)
+layers = [2, 4, 6]
+nodes = [32, 64, 128]
+try_different_architectures(config=config, dataloader=dataloader, PDE=black_scholes_1D,
+                            filename1="important_results/european_1D/arc_MSE_test.txt", filename2="important_results/european_1D/arc_epochs_test.txt",
+                            layers=layers, nodes=nodes, validation_data=validation_data, test_data=test_data, epochs=400_000)
+"""
+
 torch.manual_seed(2025)
 np.random.seed(2025)
 try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
-                             filename1="important_results/european_1D/MSE_test.txt", filename2="important_results/european_1D/epoch_test.txt",
-                             learning_rates=[1e-2, 5e-3, 1e-3], batch_sizes=[32, 64, 128, 256],
-                             validation_data=validation_data, test_data=test_data, epochs=300_000)
+                             filename1="important_results/european_1D/RMSE_lr_first.txt", filename2="important_results/european_1D/epoch_lr_first.txt",
+                             learning_rates=[1e-2,  5e-3, 1e-3, 5e-4], batch_sizes=[32, 64, 128, 256],
+                             validation_data=validation_data, test_data=test_data, epochs=600_000)
 
-""" torch.manual_seed(2025)
+
+torch.manual_seed(2025)
 np.random.seed(2025)
 try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
-                             filename1="important_results/european_1D/MSE_lr_first.txt", filename2="important_results/european_1D/epoch_lr_first.txt",
-                             learning_rates=[ 1e-2,  5e-3, 1e-3, 5e-4], batch_sizes=[32, 64, 128, 256],
-                             validation_data=validation_data, test_data=test_data, epochs=600_000) """
-
-
-""" torch.manual_seed(2025)
-np.random.seed(2025)
-try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
-                             filename1="important_results/european_1D/MSE_lr_fine.txt", filename2="important_results/european_1D/epoch_lr_fine.txt",
-                             learning_rates=[2e-3, 1e-3, 9e-4], batch_sizes=[8, 16, 24, 32, 48, 64, 72],
-                             validation_data=validation_data, test_data=test_data, epochs=600_000) """
+                             filename1="important_results/european_1D/RMSE_lr_fine.txt", filename2="important_results/european_1D/epoch_lr_fine.txt",
+                             learning_rates=[7e-4, 5e-4, 2e-4, 5e-5], batch_sizes=[256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072],
+                             validation_data=validation_data, test_data=test_data, epochs=600_000)
 
 
 """ torch.manual_seed(2025)
@@ -93,13 +106,14 @@ try_multiple_activation_functions(config=config, dataloader=dataloader, PDE=blac
 """ torch.manual_seed(2025)
 np.random.seed(2025)
 layers = [1, 2, 4, 6, 8]
-nodes = [32, 64, 128, 256, 512, 1024]
+nodes = [32, 64, 128, 256, 512]
 try_different_architectures(config=config, dataloader=dataloader, PDE=black_scholes_1D,
                             filename1="important_results/european_1D/arc_MSE.txt", filename2="important_results/european_1D/arc_epochs.txt",
                             layers=layers, nodes=nodes, validation_data=validation_data, test_data=test_data, epochs=600_000) """
 
-
-""" trying_weight_decay(config=config, dataloader=dataloader, PDE=black_scholes_1D, test_data=test_data,
+""" torch.manual_seed(2025)
+np.random.seed(2025)
+trying_weight_decay(config=config, dataloader=dataloader, PDE=black_scholes_1D, test_data=test_data,
                     filename1="important_results/european_1D/wd_MSE.txt", filename2="important_results/european_1D/wd_epochs.txt",
                     weight_decays=[1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 0.0], validation_data=validation_data,
                     epochs=600_000) """
@@ -111,18 +125,6 @@ computing_the_greeks(config=config, dataloader=dataloader, PDE=black_scholes_1D,
                      filename="important_results/european_1D/greeks.txt", validation_data=validation_data, test_data=test_data, epochs=600_000)
 config["save_model"] = False """
 
-
-""" train_multiple_times(seeds=list(range(1, 20 + 1)), layers=4, nodes=256, PDE=black_scholes_1D, filename="different_loss",
-                     nr_of_epochs=600_000, dataloader=dataloader, config=config, validation_data=validation_data, test_data=test_data) """
-
-""" torch.manual_seed(2025)
-np.random.seed(2025)
-config["scheduler_step"] = 1_000_000
-try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
-                             filename1="important_results/european_1D/MSE_lr_scheduler.txt", filename2="important_results/european_1D/epoch_lr_scheduler.txt",
-                             learning_rates=[1e-2,  5e-3, 1e-3, 5e-4], batch_sizes=[8, 16, 32, 64, 128],
-                             validation_data=validation_data, test_data=test_data, epochs=600_000)
-config["scheduler_step"] = 5_000 """
 
 """ torch.manual_seed(2025)
 np.random.seed(2025)
@@ -136,3 +138,34 @@ try_different_lambdas(config=config, dataloader=dataloader, PDE=black_scholes_1D
                                [200, 1, 1], [1, 200, 1], [1, 1, 200],
                                [200, 200, 1], [1, 200, 200], [200, 1, 200]],
                       validation_data=validation_data, test_data=test_data, epochs=600_000) """
+
+""" train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D, filename="multiple",
+                     nr_of_epochs=600_000, dataloader=dataloader, config=config, validation_data=validation_data, test_data=test_data) """
+
+""" torch.manual_seed(2025)
+np.random.seed(2025)
+config["scheduler_step"] = 1_000_000
+try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
+                             filename1="important_results/european_1D/MSE_lr_scheduler.txt", filename2="important_results/european_1D/epoch_lr_scheduler.txt",
+                             learning_rates=[5e-3, 1e-3, 5e-4], batch_sizes=[128, 512, 1024],
+                             validation_data=validation_data, test_data=test_data, epochs=600_000)
+config["scheduler_step"] = 1_000 """
+
+
+""" torch.manual_seed(2025)
+np.random.seed(2025)
+config["save_model"] = True
+config["epochs_before_validation_loss_saved"] = 120
+config["epochs_before_loss_saved"] = 120
+model = PINNforwards(2, 1, 512, 8)
+best_epoch = train(model, 3_0, config["learning_rate"], dataloader,
+                   config, "large_model", black_scholes_1D, validation_data)
+config["save_model"] = False
+config["epochs_before_validation_loss_saved"] = config["epochs_before_validation"]
+config["epochs_before_loss_saved"] = 1
+RMSE = compute_test_loss(model=model, test_data=test_data, dataloader=dataloader,
+                         analytical_solution_filename=None)
+
+with open("important_results/european_1D/large_model.txt", 'w') as outfile:
+    outfile.write(f"Best epoch : {best_epoch}\n")
+    outfile.write(f"RMSE : {RMSE}") """
