@@ -1,29 +1,65 @@
 import torch.nn as nn
 import torch
 from scipy.stats import norm
+import rff
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(DEVICE)
 
 
 class PINNforwards(nn.Module):
-    def __init__(self, N_INPUT, N_OUTPUT, N_HIDDEN, N_LAYERS, activation_function=nn.Tanh):
+    def __init__(self, N_INPUT, N_OUTPUT, N_HIDDEN, N_LAYERS, activation_function=nn.Tanh,
+                 use_fourier_transform: bool = True, sigma_FF: float = 1.0, encoded_size: int = 128, custom_arc: list[int] = None):
         super(PINNforwards, self).__init__()
+
+        print("Training model with: ")
+        if custom_arc == None:
+            print(f"LAYERS : {N_LAYERS}")
+            print(f"NODES : {N_HIDDEN}")
+
+        else:
+            print(f"ARCITECTHURE : {custom_arc}")
+
+        print(f"USING FOURIER : {use_fourier_transform}")
+        if use_fourier_transform:
+            print(f"FOURIER SIGMA : {sigma_FF}")
+            print(f"ENCODED SIZE  : {encoded_size} \n")
+        else:
+            print("")
+
+        self.use_fourier_transform = use_fourier_transform
         self.activation = activation_function
 
-        self.input_layer = nn.Sequential(
-            nn.Linear(N_INPUT, N_HIDDEN),
-            self.activation())
+        if use_fourier_transform:
+            self.encoder = rff.layers.GaussianEncoding(
+                sigma=sigma_FF, input_size=N_INPUT, encoded_size=encoded_size).to(DEVICE)
+            N_INPUT = encoded_size * 2
 
         layers = []
 
-        for _ in range(N_LAYERS):
-            layers.append(nn.Linear(N_HIDDEN, N_HIDDEN))
-            layers.append(self.activation())
+        if custom_arc is None:
+            self.input_layer = nn.Sequential(
+                nn.Linear(N_INPUT, N_HIDDEN),
+                self.activation())
+
+            for _ in range(N_LAYERS):
+                layers.append(nn.Linear(N_HIDDEN, N_HIDDEN))
+                layers.append(self.activation())
+
+            self.output_layer = nn.Linear(N_HIDDEN, N_OUTPUT)
+        else:
+            self.input_layer = nn.Sequential(
+                nn.Linear(N_INPUT, custom_arc[0]),
+                self.activation())
+
+            for i in range(1, len(custom_arc)):
+                layers.append(nn.Linear(custom_arc[i-1], custom_arc[i]))
+                layers.append(self.activation())
+
+            print(layers)
+            self.output_layer = nn.Linear(custom_arc[-1], N_OUTPUT)
 
         self.hidden_layers = nn.Sequential(*layers)
-
-        self.output_layer = nn.Linear(N_HIDDEN, N_OUTPUT)
 
         self._initialize_weights()
 
@@ -35,6 +71,9 @@ class PINNforwards(nn.Module):
                     nn.init.zeros_(layer.bias)
 
     def forward(self, x):
+        if self.use_fourier_transform:
+            x = self.encoder(x)
+
         x = self.input_layer(x)
         x = self.hidden_layers(x)
         x = self.output_layer(x)

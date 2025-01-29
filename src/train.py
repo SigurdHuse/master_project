@@ -108,6 +108,7 @@ def create_validation_data(dataloader:
         N_validation, w_expiry)
     expiry_x_tensor_validation_scaled = dataloader.normalize(
         expiry_x_tensor_validation)
+    # config["encoder"](expiry_x_tensor_validation)
 
     validation_data["expiry_x_tensor_validation"] = expiry_x_tensor_validation.to(
         DEVICE)
@@ -120,8 +121,13 @@ def create_validation_data(dataloader:
         N_validation, w_lower, w_upper)
     lower_x_tensor_validation_scaled = dataloader.normalize(
         lower_x_tensor_validation)
+
+    # config["encoder"](
+    #    lower_x_tensor_validation)
     upper_x_tensor_validation_scaled = dataloader.normalize(
         upper_x_tensor_validation)
+
+    # config["encoder"](    upper_x_tensor_validation)
 
     validation_data["lower_x_tensor_validation"] = lower_x_tensor_validation.to(
         DEVICE)
@@ -140,6 +146,7 @@ def create_validation_data(dataloader:
     X1_validation, y1_validation = dataloader.get_pde_data_tensor(
         N_validation)
     X1_validation_scaled = dataloader.normalize(X1_validation)
+    # config["encoder"](X1_validation)
 
     validation_data["X1_validation"] = X1_validation
 
@@ -235,6 +242,7 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
     expiry_x_tensor, expiry_y_tensor = dataloader.get_expiry_time_tensor(
         N_sample, w_expiry)
 
+    # config["encoder"](expiry_x_tensor)
     expiry_x_tensor = dataloader.normalize(expiry_x_tensor)
 
     expiry_y_pred = model(expiry_x_tensor)
@@ -244,7 +252,10 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
     lower_x_tensor, lower_y_tensor, upper_x_tensor, upper_y_tensor = dataloader.get_boundary_data_tensor(
         N_sample, w_lower, w_upper)
 
+    # config["encoder"](lower_x_tensor)
     lower_x_tensor = dataloader.normalize(lower_x_tensor)
+
+    # config["encoder"](upper_x_tensor)
     upper_x_tensor = dataloader.normalize(upper_x_tensor)
 
     lower_y_pred = model(lower_x_tensor)
@@ -261,7 +272,7 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
     # Compute the "Black-Scholes loss"
     X1, y1 = dataloader.get_pde_data_tensor(N_sample)
 
-    X1_scaled = dataloader.normalize(X1)
+    X1_scaled = dataloader.normalize(X1)  # config["encoder"](X1)
 
     y1_hat = model(X1_scaled)
 
@@ -535,7 +546,8 @@ def try_different_learning_rates(config: dict, dataloader, PDE, filename1: str, 
     epoch_data = np.zeros((len(learning_rates), len(batch_sizes)))
     mse_data = np.zeros((len(learning_rates), len(batch_sizes)))
 
-    model = PINNforwards(config["N_INPUT"], 1, 128, 4)
+    model = PINNforwards(N_INPUT=config["N_INPUT"], N_OUTPUT=1, N_HIDDEN=128,
+                         N_LAYERS=4, use_fourier_transform=config["use_fourier_transform"], sigma_FF=config["sigma_fourier"], encoded_size=config["fourier_encoded_size"])
     start_model = copy.deepcopy(model.state_dict())
 
     for i, learning_rate in enumerate(learning_rates):
@@ -636,7 +648,7 @@ def try_different_architectures(config: dict, dataloader, PDE, filename1: str, f
 
 
 def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filename: str,
-                         nr_of_epochs: int, dataloader, config: dict, validation_data: dict, test_data: dict, analytical_solution_filename: str = None):
+                         nr_of_epochs: int, dataloader, config: dict, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, custom_arc: list[int] = None):
     cur_config = config.copy()
     cur_config["save_loss"] = True
 
@@ -677,7 +689,10 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
     for i, seed in enumerate(seeds):
         torch.manual_seed(seed)
         np.random.seed(seed)
-        model = PINNforwards(cur_config["N_INPUT"], 1, nodes, layers)
+        model = PINNforwards(N_INPUT=cur_config["N_INPUT"], N_OUTPUT=1, N_HIDDEN=nodes, N_LAYERS=layers,
+                             use_fourier_transform=config["use_fourier_transform"], sigma_FF=config["sigma_fourier"],
+                             encoded_size=config["fourier_encoded_size"], custom_arc=custom_arc)
+
         train(model, nr_of_epochs, config["learning_rate"], dataloader, cur_config, str(
             seed), PDE, validation_data)
 
@@ -722,7 +737,9 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
         if mse_data[i] < best_test_MSE:
             best_test_MSE = mse_data[i]
             best_model = copy.deepcopy(model.state_dict())
-        print(f"Run {i} / {len(seeds)} done \n")
+
+        print(f"Run {i + 1} / {len(seeds)} done")
+        print(f"RMSE : {mse_data[i]:.2e} \n")
 
     if config["save_model"]:
         torch.save(best_model, f"models/" + filename + ".pth")
@@ -732,7 +749,7 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
 
     np.save("results/average_validation_" +
             filename, np.vstack([results_val.mean(axis=0), results_val.std(axis=0)]))
-    np.savetxt("results/mse_data_" + filename + ".txt", mse_data)
+    np.savetxt("results/rmse_data_" + filename + ".txt", mse_data)
 
 
 def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validation_data: dict, test_data: dict, epochs: int = 250_000):
@@ -956,6 +973,38 @@ def try_different_lambdas(config: dict, dataloader, PDE, filename1: str, filenam
 
         print(f"Trial {i} Done")
         print("RMSE", mse_data[i])
+    np.savetxt(filename1, mse_data)
+    np.savetxt(filename2, epoch_data)
+
+
+def try_sigma_fourier_and_embedding_size(config: dict, dataloader, PDE, filename1: str, filename2: str, sigma_fourier: list, embedding_size: list, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 200_000):
+    cur_config = copy.deepcopy(config)
+
+    epoch_data = np.zeros((len(sigma_fourier), len(embedding_size)))
+    mse_data = np.zeros((len(sigma_fourier), len(embedding_size)))
+
+    for i, sg_fourier in enumerate(sigma_fourier):
+        for j, em_size in enumerate(embedding_size):
+            cur_config["sigma_fourier"] = sg_fourier
+            cur_config["fourier_encoded_size"] = em_size
+
+            model = PINNforwards(N_INPUT=config["N_INPUT"], N_OUTPUT=1, N_HIDDEN=128,
+                                 N_LAYERS=4, use_fourier_transform=config["use_fourier_transform"], sigma_FF=sg_fourier, encoded_size=em_size)
+            model.train(True)
+            best_epoch = train(
+                model, epochs, config["learning_rate"], dataloader, cur_config, "", PDE, validation_data)
+
+            model.train(False)
+            model.eval()
+
+            mse_data[i, j] = compute_test_loss(
+                model=model, test_data=test_data, dataloader=dataloader, analytical_solution_filename=analytical_solution_filename)
+
+            epoch_data[i, j] = best_epoch
+
+            print(f"Trial {j + i*len(embedding_size) +
+                  1} / {len(embedding_size)*len(sigma_fourier)} Done")
+            print("RMSE", mse_data[i, j])
     np.savetxt(filename1, mse_data)
     np.savetxt(filename2, epoch_data)
 

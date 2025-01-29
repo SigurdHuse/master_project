@@ -1,9 +1,10 @@
 from train import black_scholes_1D, DEVICE
 from train import try_multiple_activation_functions, try_different_learning_rates, try_different_architectures
-from train import train_multiple_times, create_validation_data
+from train import train_multiple_times, create_validation_data, try_sigma_fourier_and_embedding_size
 from train import train, computing_the_greeks, trying_weight_decay, try_different_lambdas, compute_test_loss
 from data_generator import DataGeneratorEuropean1D
 from PINN import PINNforwards
+import rff
 
 import torch
 import torch.nn as nn
@@ -15,6 +16,11 @@ np.random.seed(2025)
 
 
 config = {}
+
+config["N_INPUT"] = 2
+config["use_fourier_transform"] = True
+config["sigma_fourier"] = 5.0
+config["fourier_encoded_size"] = 128
 
 config["w_expiry"] = 1
 config["w_lower"] = 1
@@ -37,10 +43,9 @@ config["S_range"] = [0, 400]
 config["sigma"] = 0.5
 config["r"] = 0.04
 
-config["learning_rate"] = 7e-4
+config["learning_rate"] = 1e-3
 config["save_model"] = False
 config["save_loss"] = False
-config["N_INPUT"] = 2
 config["epochs_before_validation"] = 30
 
 config["epochs_before_validation_loss_saved"] = config["epochs_before_validation"]
@@ -63,9 +68,9 @@ train(model, 10_000, config["learning_rate"], dataloader,
 """ torch.manual_seed(2025)
 np.random.seed(2025)
 try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
-                             filename1="important_results/european_1D/MSE_test_scaled.txt", filename2="important_results/european_1D/epoch_test_scaled.txt",
-                             learning_rates=[1e-3], batch_sizes=[128],
-                             validation_data=validation_data, test_data=test_data, epochs=500_000) """
+                             filename1="important_results/european_1D/fourier_encoder.txt", filename2="important_results/european_1D/epoch_fourier_encoder.txt",
+                             learning_rates=[1e-3], batch_sizes=[256, 1024],
+                             validation_data=validation_data, test_data=test_data, epochs=300_000) """
 
 
 """ torch.manual_seed(2025)
@@ -77,20 +82,27 @@ try_different_architectures(config=config, dataloader=dataloader, PDE=black_scho
                             layers=layers, nodes=nodes, validation_data=validation_data, test_data=test_data, epochs=400_000)
 """
 
-torch.manual_seed(2025)
+""" torch.manual_seed(2025)
 np.random.seed(2025)
 try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
                              filename1="important_results/european_1D/RMSE_lr_first.txt", filename2="important_results/european_1D/epoch_lr_first.txt",
-                             learning_rates=[1e-2,  5e-3, 1e-3, 5e-4], batch_sizes=[32, 64, 128, 256],
-                             validation_data=validation_data, test_data=test_data, epochs=600_000)
+                             learning_rates=[5e-3, 1e-3, 5e-4], batch_sizes=[256, 512, 1024, 2048, 4096],
+                             validation_data=validation_data, test_data=test_data, epochs=600_000) """
 
-
-torch.manual_seed(2025)
+""" torch.manual_seed(2025)
 np.random.seed(2025)
-try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
-                             filename1="important_results/european_1D/RMSE_lr_fine.txt", filename2="important_results/european_1D/epoch_lr_fine.txt",
-                             learning_rates=[7e-4, 5e-4, 2e-4, 5e-5], batch_sizes=[256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072],
-                             validation_data=validation_data, test_data=test_data, epochs=600_000)
+try_sigma_fourier_and_embedding_size(config=config, dataloader=dataloader, PDE=black_scholes_1D,
+                                     filename1="important_results/european_1D/RMSE_fourier.txt", filename2="important_results/european_1D/epoch_fourier.txt",
+                                     sigma_fourier=[1.0, 5.0, 10.0], embedding_size=[32, 64, 128, 256, 512], validation_data=validation_data, test_data=test_data, epochs=600_000) """
+
+
+""" config["use_fourier_transform"] = False
+train_multiple_times(seeds=list(range(1, 10 + 1)), layers=0, nodes=0, PDE=black_scholes_1D, filename="no_fourier",
+                     nr_of_epochs=600_000, dataloader=dataloader, config=config, validation_data=validation_data, test_data=test_data, custom_arc=[256, 128, 128, 128, 128])
+config["use_fourier_transform"] = True """
+
+""" train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D, filename="with_fourier",
+                     nr_of_epochs=600_000, dataloader=dataloader, config=config, validation_data=validation_data, test_data=test_data) """
 
 
 """ torch.manual_seed(2025)
@@ -118,12 +130,12 @@ trying_weight_decay(config=config, dataloader=dataloader, PDE=black_scholes_1D, 
                     weight_decays=[1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 0.0], validation_data=validation_data,
                     epochs=600_000) """
 
-""" torch.manual_seed(2025)
+torch.manual_seed(2025)
 np.random.seed(2025)
 config["save_model"] = True
 computing_the_greeks(config=config, dataloader=dataloader, PDE=black_scholes_1D,
                      filename="important_results/european_1D/greeks.txt", validation_data=validation_data, test_data=test_data, epochs=600_000)
-config["save_model"] = False """
+config["save_model"] = False
 
 
 """ torch.manual_seed(2025)
