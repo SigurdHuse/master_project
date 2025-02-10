@@ -129,9 +129,13 @@ def visualize_one_dimensional(n: int, path_to_weights: str, name_of_plot: str):
                     width=2200, height=800, scale=1)
 
 
+def standard_normal_pdf(x):
+    return (1 / torch.sqrt(torch.tensor(2 * torch.pi))) * torch.exp(-x.pow(2) / 2)
+
+
 def plots_greeks(n: int, time: float, path_to_weights: str, name_of_plot: str):
-    n = 1_000
-    S_range = [0, 200]
+    # n = 1_000
+    S_range = [0, 400]
     t_range = [0, 1]
     S = np.linspace(*S_range, n)
     T = np.full(n, time)
@@ -145,48 +149,111 @@ def plots_greeks(n: int, time: float, path_to_weights: str, name_of_plot: str):
 
     X_scaled = (X - min_values) / (max_values - min_values)
 
-    model = PINNforwards(2, 1, 256, 4)
+    model = PINNforwards(
+        2, 1, 128, 4, use_fourier_transform=True, sigma_FF=5.0, encoded_size=128)
     model.load_state_dict(torch.load(path_to_weights, weights_only=True))
     model = model.to(DEVICE)
 
+    r = 0.04
+    sigma = 0.5
+    K = 40
+
+    t2m = 1.0-T
+    t2m = torch.from_numpy(t2m).to(DEVICE)
+    S_torch = torch.from_numpy(S).to(DEVICE)
+
+    d1 = (torch.log(S_torch / K) + (r + 0.5 * sigma**2)
+          * t2m) / (sigma * torch.sqrt(t2m))
+
+    d2 = d1 - sigma * torch.sqrt(t2m)
+
+    standard_normal = Normal(0, 1)
+
+    analytical_delta = standard_normal.cdf(d1).cpu().detach().numpy()
+    analytical_gamma = (standard_normal_pdf(
+        d1) / (S_torch * sigma * t2m)).cpu().detach().numpy()
+    analytical_rho = (t2m * K * torch.exp(-r * t2m) *
+                      standard_normal.cdf(d2)).cpu().detach().numpy()
+
+    analytical_theta = (-S_torch * sigma / (2 * torch.sqrt(t2m)) * standard_normal_pdf(
+        d1) - r * K * torch.exp(- r * t2m) * standard_normal.cdf(d2)).cpu().detach().numpy()
+
+    analytical_nu = (S_torch * torch.sqrt(t2m) *
+                     standard_normal_pdf(d1)).cpu().detach().numpy()
+
     delta, gamma, theta, nu, rho = model.estimate_greeks_call(
         X_scaled, X, 0.5, t_range[1])
+
+    Nd1 = standard_normal.cdf(d1)
+    Nd2 = standard_normal.cdf(d2)
+
+    # Calculate the option price
+    analytical_price = (S_torch * Nd1 - K * Nd2 *
+                        torch.exp(-r * t2m)).to("cpu").detach().numpy().flatten()
+
+    price = model(X_scaled)
 
     delta = delta.to("cpu").detach().numpy().flatten()
     gamma = gamma.to("cpu").detach().numpy().flatten()
     theta = theta.to("cpu").detach().numpy().flatten()
     nu = nu.to("cpu").detach().numpy().flatten()
     rho = rho.to("cpu").detach().numpy().flatten()
+    price = price.to("cpu").detach().numpy().flatten()
 
     fig = make_subplots(
         rows=2, cols=3,
         specs=[
             [{'type': 'xy'}, {'type': 'xy'}, {'type': 'xy'}],  # Row 1: 3 columns
-            [{'type': 'xy'}, {'type': 'xy'}, None]            # Row 2: 2 columns
+            # Row 2: 2 columns
+            [{'type': 'xy'}, {'type': 'xy'}, {'type': 'xy'}]
         ],
         subplot_titles=(r"$\Delta$", r"$\Gamma$",
-                        r"$\Theta$", r"$\nu$", r"$\rho$"),
+                        r"$\Theta$", r"$\nu$", r"$\rho$", "Pricing function"),
         horizontal_spacing=0.1,  # Adjust horizontal spacing
         vertical_spacing=0.2     # Adjust vertical spacing
     )
 
     # Add line plots to the first row
+    fig.add_trace(go.Scatter(x=S, y=analytical_delta, mode='lines',
+                  line=dict(width=4, color='black', dash='dot')), row=1, col=1)
+
     fig.add_trace(go.Scatter(x=S, y=delta, mode='lines',
                   line=dict(width=2)), row=1, col=1)
+
+    fig.add_trace(go.Scatter(x=S, y=analytical_gamma, mode='lines',
+                  line=dict(width=4, color='black', dash='dot')), row=1, col=2)
+
     fig.add_trace(go.Scatter(x=S, y=gamma, mode='lines',
                   line=dict(width=2)), row=1, col=2)
+
+    fig.add_trace(go.Scatter(x=S, y=analytical_theta, mode='lines',
+                  line=dict(width=4, color='black', dash='dot')), row=1, col=3)
+
     fig.add_trace(go.Scatter(x=S, y=theta, mode='lines',
                   line=dict(width=2)), row=1, col=3)
 
     # Add line plots to the second row
+    fig.add_trace(go.Scatter(x=S, y=analytical_nu, mode='lines',
+                  line=dict(width=4, color='black', dash='dot')), row=2, col=1)
+
     fig.add_trace(go.Scatter(x=S, y=nu, mode='lines',
                   line=dict(width=2)), row=2, col=1)
+
+    fig.add_trace(go.Scatter(x=S, y=analytical_rho, mode='lines',
+                  line=dict(width=4, color='black', dash='dot')), row=2, col=2)
+
     fig.add_trace(go.Scatter(x=S, y=rho, mode='lines',
                   line=dict(width=2)), row=2, col=2)
 
+    fig.add_trace(go.Scatter(x=S, y=analytical_price, mode='lines',
+                  line=dict(width=4, color='black', dash='dot')), row=2, col=3)
+
+    fig.add_trace(go.Scatter(x=S, y=price, mode='lines',
+                  line=dict(width=2)), row=2, col=3)
+
     # Update layout
     fig.update_layout(
-        title=f"Different Greeks at t = {time}",
+        # title=f"Different Greeks at t = {time}",
         height=800,  # Adjust height to fit all subplots
         width=1000,  # Adjust width for better aspect ratio
         font=dict(size=20),  # Adjust font size
@@ -199,12 +266,15 @@ def plots_greeks(n: int, time: float, path_to_weights: str, name_of_plot: str):
     fig.update_xaxes(title_text="Stock Price", row=1, col=3)
     fig.update_xaxes(title_text="Stock Price", row=2, col=1)
     fig.update_xaxes(title_text="Stock Price", row=2, col=2)
+    fig.update_xaxes(title_text="Stock Price", row=2, col=3)
+
     # Show the plot
     fig.write_image(name_of_plot, width=2200, height=800, scale=1)
+    # fig.show()
 
 
 if __name__ == "__main__":
-    visualize_one_dimensional(50, "models/greeks.pth",
-                              "plots/one_dim_european.pdf")
+    """ visualize_one_dimensional(50, "models/greeks.pth",
+                              "plots/one_dim_european.pdf") """
     plots_greeks(10_000, 0.5, "models/greeks.pth",
                  "plots/one_dim_european_greeks.pdf")

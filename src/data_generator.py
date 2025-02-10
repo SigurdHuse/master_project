@@ -225,22 +225,22 @@ class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
         upper_y = np.zeros((int(w2*n), 1))
         return lower_X, lower_y, upper_X, upper_y
 
-    def _compute_analytical_solution(self, S, t, n=250):
+    def _compute_analytical_solution(self, S, t, M=250):
         T = self.time_range[-1]-t
-        delta_t = T / n
+        delta_t = T / M
         u = np.exp(self.sigma * np.sqrt(delta_t))
         d = 1 / u
         p = (np.exp(self.r * delta_t) - d) / (u - d)
         # Initialize option values at maturity
         option_values = np.maximum(
-            self.K - S * u**np.arange(n+1) * d**(n-np.arange(n+1)), np.zeros(n+1))
+            self.K - S * u**np.arange(M+1) * d**(M-np.arange(M+1)), np.zeros(M+1))
         # Backward induction
-        for i in range(n-1, -1, -1):
+        for i in range(M-1, -1, -1):
             option_values = np.maximum((self.K - S * u**np.arange(i+1) * d**(i-np.arange(i+1))),
                                        np.exp(-self.r * delta_t) * (p * option_values[:i+1] + (1 - p) * option_values[1:i+2]))
         return option_values[0]
 
-    def get_analytical_solution(self, S, t, n=250):
+    def get_analytical_solution(self, S, t, M=250):
         res = np.array([self._compute_analytical_solution(
-            S[i], t[i], n=n) for i in tqdm(range(len(S)))])
+            S[i], t[i], M=M) for i in tqdm(range(len(S)), miniters=10_000, maxinterval=10_000)])
         return res
