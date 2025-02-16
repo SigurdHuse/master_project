@@ -1,7 +1,7 @@
-from train import black_scholes_american_1D, DEVICE
+from train import black_scholes_american_1D
 from data_generator import DataGeneratorAmerican1D
 from train import create_validation_data
-
+from plotter import make_3D_american_plot
 
 from training_functions import experiment_with_binomial_model, try_multiple_activation_functions, try_different_learning_rates
 
@@ -61,28 +61,37 @@ validation_data = create_validation_data(
 test_data = create_validation_data(
     dataloader=dataloader, N_validation=20_000, config=config)
 
-experiment_with_binomial_model(M_values=[32, 64, 128, 256, 384, 512, 768, 1024, 1280, 1536, 1792, 2048], dataloader=dataloader, test_data=test_data,
-                               filename1="important_results/american_1D/RMSE_binomial.txt", filename2="important_results/american_1D/timings_binomial.txt")
+""" experiment_with_binomial_model(M_values=[32, 64, 128, 256, 384, 512, 768, 1024, 1280, 1536, 1792, 2048], dataloader=dataloader, test_data=test_data,
+                               filename1="important_results/american_1D/RMSE_binomial.txt", filename2="important_results/american_1D/timings_binomial.txt") """
 
 
 """ tmp_X = test_data["X1_validation"].cpu().detach().numpy()
-test = dataloader.get_analytical_solution(tmp_X[:, 1], tmp_X[:, 0], n=1024)
-np.save("data/test_data_american_1D", test) """
+test = dataloader.get_analytical_solution(tmp_X[:, 1], tmp_X[:, 0], M=2048)
+np.save("data/test_data_american_1D", test)
 
+make_3D_american_plot("plots/american_3D.png", tmp_X) """
 
 """ torch.manual_seed(2026)
 np.random.seed(2026)
 try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_american_1D,
-                             filename2="important_results/american_1D/learning_rates_epochs.txt",
-                             filename1="important_results/american_1D/learning_rates.txt",
-                             learning_rates=[1e-3], batch_sizes=[8, 16, 24, 32, 48, 64, 128, 256],
+                             filename2="important_results/american_1D/epochs_test.txt",
+                             filename1="important_results/american_1D/RMSE_test.txt",
+                             learning_rates=[1e-3], batch_sizes=[256, 512, 1024, 2048],
                              validation_data=validation_data, test_data=test_data,  analytical_solution_filename="data/test_data_american_1D.npy", epochs=600_000) """
+
+torch.manual_seed(2026)
+np.random.seed(2026)
+try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_american_1D,
+                             filename2="important_results/american_1D/epochs_lr.txt",
+                             filename1="important_results/american_1D/RMSE_lr.txt",
+                             learning_rates=[5e-3, 1e-3, 5e-4], batch_sizes=[256, 512, 1024],
+                             validation_data=validation_data, test_data=test_data,  analytical_solution_filename="data/test_data_american_1D.npy", epochs=600_000)
 
 """ torch.manual_seed(2026)
 np.random.seed(2026)
 try_multiple_activation_functions(config=config, dataloader=dataloader, PDE=black_scholes_american_1D,
-                                  filename1="important_results/american_1D/activation_1D_american.txt",
-                                  filename2="important_results/american_1D/activation_epochs_1D_american.txt",
+                                  filename1="important_results/american_1D/RMSE_activation.txt",
+                                  filename2="important_results/american_1D/epochs_activation.txt",
                                   activation_functions=[
                                       nn.ReLU, nn.LeakyReLU, nn.Sigmoid, nn.Tanh],
-                                  layers=[2, 4, 6, 8], validation_data=validation_data, test_data=test_data, analytical_solution_filename="data/test_data_american_1D.npy", epochs=600_000) """
+                                  layers=[1, 2, 4, 8], validation_data=validation_data, test_data=test_data, analytical_solution_filename="data/test_data_american_1D.npy", epochs=600_000) """

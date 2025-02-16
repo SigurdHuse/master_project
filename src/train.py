@@ -69,6 +69,7 @@ def black_scholes_1D(y1_hat, X1, config):
     S1 = X1[:, 1].view(-1, 1)
     bs_pde = dVdt + (0.5 * ((sigma**2) * (S1 ** 2)) * d2VdS2) + \
         (r * S1 * dVdS) - (r * y1_hat)
+
     return bs_pde
 
 
@@ -91,9 +92,9 @@ def black_scholes_american_1D(y1_hat, X1, config):
     yint = torch.max(K - S1, torch.zeros_like(S1))
     free_pde = yint - y1_hat
 
-    combined_pde = bs_pde*free_pde,
+    combined_pde = bs_pde*free_pde
     # print(type(combined_pde[1]))
-    return combined_pde[0]
+    return combined_pde
 
 
 def create_validation_data(dataloader:
@@ -395,7 +396,7 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
 
     return best_validation_epoch
 
-    if config["save_model"]:
+    """ if config["save_model"]:
         torch.save(best_model, f"models/" + filename + ".pth")
 
     np.save("results/average_loss_" +
@@ -403,7 +404,7 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
 
     np.save("results/average_validation_" +
             filename, np.vstack([results_val.mean(axis=0), results_val.std(axis=0)]))
-    np.savetxt("results/rmse_data_" + filename + ".txt", mse_data)
+    np.savetxt("results/rmse_data_" + filename + ".txt", mse_data) """
 
 
 if __name__ == "__main__":

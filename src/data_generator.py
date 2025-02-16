@@ -214,7 +214,7 @@ class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
                                   self.S_range[0] * np.ones((int(w1*n), 1))], axis=1)
 
         lower_y = self.K * np.ones((int(n*w1), 1)) * \
-            np.exp(- self.r * (T - lower_X[:, 0]))
+            np.exp(- self.r * (T - lower_X[:, 0].reshape(-1))).reshape(-1, 1)
 
         upper_sample = self.sampler_1D.random(n=int(w2*n))
         upper_sample = qmc.scale(

@@ -233,7 +233,6 @@ def trying_weight_decay(config: dict, dataloader, PDE, filename1: str, filename2
                          N_LAYERS=4, use_fourier_transform=config["use_fourier_transform"], sigma_FF=config["sigma_fourier"], encoded_size=config["fourier_encoded_size"])
     start_model = copy.deepcopy(model.state_dict())
 
-    MSE = nn.MSELoss()
     for i, weight_decay in enumerate(weight_decays):
         cur_config["weight_decay"] = weight_decay
         model.load_state_dict(start_model)
