@@ -15,6 +15,7 @@ torch.set_default_device(DEVICE)
 
 config = {}
 
+config["american_option"] = False
 config["N_INPUT"] = 2
 config["use_fourier_transform"] = True
 config["sigma_fourier"] = 5.0

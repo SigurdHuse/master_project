@@ -89,12 +89,10 @@ def black_scholes_american_1D(y1_hat, X1, config):
         (r * S1 * dVdS) - (r * y1_hat)
 
     # free region: option exercise immediately
-    yint = torch.max(K - S1, torch.zeros_like(S1))
-    free_pde = yint - y1_hat
-
-    combined_pde = bs_pde*free_pde
+    yint = torch.fmax(K - S1, torch.zeros_like(S1))
+    free_boundary = torch.clamp(yint - y1_hat, min=0)
     # print(type(combined_pde[1]))
-    return combined_pde
+    return bs_pde, free_boundary
 
 
 def create_validation_data(dataloader:
@@ -204,9 +202,18 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
 
     y1_hat = model(X1_scaled)
 
-    bs_pde = PDE(y1_hat, X1, config)
+    if config["american_option"]:
+        bs_pde, free_boundary = PDE(y1_hat, X1, config)
 
-    loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
+        loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
+        loss_free_boundary = loss_function(
+            free_boundary, torch.zeros_like(free_boundary))
+
+        loss_pde = loss_pde + loss_free_boundary
+    else:
+        bs_pde = PDE(y1_hat, X1, config)
+
+        loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
     # Backpropagate joint loss
     loss = loss_boundary + config["lambda_pde"] * loss_pde
 
@@ -260,9 +267,6 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
 
 def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: dict, filename: str, PDE, validation_data: dict = {}, final_learning_rate=1e-5):
     epochs_before_validation = config["epochs_before_validation"]
-    # config["lambda_pde"] = 1
-    # config["lambda_boundary"] = 1
-    # config["lambda_expiry"] = 1
     n = np.log(final_learning_rate / learning_rate) / np.log(config["gamma"])
 
     scheduler_step = int(nr_of_epochs // n)
@@ -334,11 +338,21 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
                 loss_boundary = mse_expiry + (mse_lower + mse_upper)/2
 
             y1_hat = model(X1_validation_scaled)
-            bs_pde = PDE(y1_hat, X1_validation, config)
 
-            loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
+            if config["american_option"]:
+                bs_pde, free_boundary = PDE(y1_hat, X1_validation, config)
 
-            loss = loss_boundary + loss_pde
+                loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
+                loss_free_boundary = loss_function(
+                    free_boundary, torch.zeros_like(free_boundary))
+
+                loss_pde = loss_pde + loss_free_boundary
+
+                loss = loss_boundary + loss_pde
+            else:
+                bs_pde = PDE(y1_hat, X1_validation, config)
+                loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
+                loss = loss_boundary + loss_pde
 
             # Make sure the validation prediction does not affect the training
             optimizer.zero_grad()
@@ -395,16 +409,6 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
     model.load_state_dict(best_model)
 
     return best_validation_epoch
-
-    """ if config["save_model"]:
-        torch.save(best_model, f"models/" + filename + ".pth")
-
-    np.save("results/average_loss_" +
-            filename, np.vstack([results_train.mean(axis=0), results_train.std(axis=0)]))
-
-    np.save("results/average_validation_" +
-            filename, np.vstack([results_val.mean(axis=0), results_val.std(axis=0)]))
-    np.savetxt("results/rmse_data_" + filename + ".txt", mse_data) """
 
 
 if __name__ == "__main__":

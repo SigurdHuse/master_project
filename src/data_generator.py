@@ -225,7 +225,7 @@ class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
         upper_y = np.zeros((int(w2*n), 1))
         return lower_X, lower_y, upper_X, upper_y
 
-    def _compute_analytical_solution(self, S, t, M=250):
+    def _compute_analytical_solution(self, S, t, M=1024):
         T = self.time_range[-1]-t
         delta_t = T / M
         u = np.exp(self.sigma * np.sqrt(delta_t))
@@ -240,7 +240,7 @@ class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
                                        np.exp(-self.r * delta_t) * (p * option_values[:i+1] + (1 - p) * option_values[1:i+2]))
         return option_values[0]
 
-    def get_analytical_solution(self, S, t, M=250):
+    def get_analytical_solution(self, S, t, M=1024):
         res = np.array([self._compute_analytical_solution(
             S[i], t[i], M=M) for i in tqdm(range(len(S)), miniters=10_000, maxinterval=10_000)])
         return res

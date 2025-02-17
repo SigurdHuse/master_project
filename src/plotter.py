@@ -11,8 +11,9 @@ import torch
 import numpy as np
 from PINN import PINNforwards
 from data_generator import DataGeneratorAmerican1D, DataGeneratorEuropean1D
-from matplotlib.colors import LogNorm
+from matplotlib.colors import LogNorm, SymLogNorm
 import experiments_european_one_dimensional as one_euro
+import experiments_american_one_dimensional as one_american
 
 torch.set_default_device(DEVICE)
 
@@ -347,9 +348,16 @@ def make_3D_american_plot(filename, X):
     plt.savefig(filename)
 
 
-def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, values_to_skip=100, skip_every=5):
-    X_loss = np.load(f"results/loss_{name_of_model}.npy")
-    X_validation = np.load(f"results/validation_{name_of_model}.npy")
+def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, values_to_skip=100, skip_every=5, use_average=False):
+    if use_average:
+        X_loss = np.load(f"results/average_loss_{name_of_model}.npy")
+        X_loss = X_loss[: X_loss.shape[0] // 2]
+        X_validation = np.load(
+            f"results/average_validation_{name_of_model}.npy")
+        X_validation = X_validation[: X_validation.shape[0] // 2]
+    else:
+        X_loss = np.load(f"results/loss_{name_of_model}.npy")
+        X_validation = np.load(f"results/validation_{name_of_model}.npy")
 
     fig, ax = plt.subplots(1, 2, figsize=(12, 5))
 
@@ -377,10 +385,11 @@ def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, v
 
     ax[1].legend()
     ax[1].set_yscale("log")
+    fig.tight_layout()
     plt.savefig(filename)
 
 
-def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.tensor], dataloader, filename):
+def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.tensor], dataloader, filename, analytical_solution_filename: str = None):
     X1_test = test_data["X1_validation"]
     X1_test_scaled = test_data["X1_validation_scaled"]
 
@@ -396,8 +405,11 @@ def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.te
     upper_x_tensor_test_scaled = test_data["upper_x_tensor_validation_scaled"]
     upper_y_tensor_test = test_data["upper_y_tensor_validation"]
 
-    analytical_solution = dataloader.get_analytical_solution(
-        X1_test[:, 1], X1_test[:, 0]).cpu().detach().numpy()
+    if analytical_solution_filename is None:
+        analytical_solution = dataloader.get_analytical_solution(
+            X1_test[:, 1], X1_test[:, 0]).cpu().detach().numpy()
+    else:
+        analytical_solution = np.load(analytical_solution_filename)
 
     analytical_solution = analytical_solution.reshape(
         analytical_solution.shape[0], -1)
@@ -429,7 +441,8 @@ def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.te
 
     fig, ax = plt.subplots(1, 2, figsize=(12, 5))
 
-    scatter1 = ax[0].scatter(all_points[:, 0], all_points[:, 1], c=all_preds)
+    scatter1 = ax[0].scatter(
+        all_points[:, 0], all_points[:, 1], c=all_preds, norm=SymLogNorm(linthresh=10**(-8)))
     cbar1 = plt.colorbar(scatter1, ax=ax[0])
     ax[0].set_title("Predicted values")
 
@@ -452,14 +465,18 @@ if __name__ == "__main__":
     """ binomial_plot("plots/binomial.pdf")
     plt.clf() """
 
-    plots_greeks(10_000, 0.5, "models/greeks.pth",
-                 "plots/one_dim_european_greeks.pdf")
+    """ plots_greeks(10_000, 0.5, "models/greeks.pth",
+                 "plots/one_dim_european_greeks.pdf") """
 
     """ plot_different_loss("large_model", "plots/large_model_loss.pdf",
                         x_values=np.arange(1, 3_000_000 + 1, 1200))
 
     plot_different_loss("small_model", "plots/small_model_loss.pdf",
                         x_values=np.arange(1, 200_000 + 1, 90)[1:]) """
+
+    """ plot_different_loss("american_multiple", "plots/american_loss.pdf", values_to_skip=100,
+                        x_values=np.arange(1, 600_000 + 1, 600), use_average=True) """
+
     """ torch.manual_seed(2025)
     np.random.seed(2025)
     dataloader = DataGeneratorEuropean1D(
@@ -484,3 +501,23 @@ if __name__ == "__main__":
         large_model, test_data, dataloader, "plots/large_model.jpg")
     plot_heat_map_of_predicted_versus_analytical(
         small_model, test_data, dataloader, "plots/small_model.jpg") """
+
+    torch.manual_seed(2026)
+    np.random.seed(2026)
+    dataloader_american = DataGeneratorAmerican1D(
+        time_range=one_american.config["t_range"], S_range=one_american.config["S_range"],
+        K=one_american.config["K"], r=one_american.config["r"], sigma=one_american.config["sigma"], DEVICE=DEVICE)
+
+    validation_data = create_validation_data(
+        dataloader=dataloader_american, N_validation=5_000, config=one_american.config)
+
+    test_data = create_validation_data(
+        dataloader=dataloader_american, N_validation=20_000, config=one_american.config)
+
+    american_model = PINNforwards(
+        2, 1, 128, 4, use_fourier_transform=True, sigma_FF=5.0, encoded_size=128)
+    american_model.load_state_dict(torch.load(
+        "models/american_multiple.pth", weights_only=True))
+
+    plot_heat_map_of_predicted_versus_analytical(
+        american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy")

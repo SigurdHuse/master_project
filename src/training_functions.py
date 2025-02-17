@@ -176,17 +176,18 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
                          nr_of_epochs: int, dataloader, config: dict, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, custom_arc: list[int] = None):
     cur_config = config.copy()
     cur_config["save_loss"] = True
+    cur_config["save_model"] = False
 
     types_of_loss = ["total_loss", "loss_boundary",
                      "loss_pde", "loss_expiry", "loss_lower", "loss_upper"]
 
-    results_train = np.zeros((len(seeds), nr_of_epochs, len(types_of_loss)))
+    results_train = np.zeros(
+        (len(seeds), nr_of_epochs // config["epochs_before_loss_saved"], len(types_of_loss)))
     results_val = np.zeros(
-        (len(seeds), nr_of_epochs // config["epochs_before_validation"], len(types_of_loss)))
+        (len(seeds), nr_of_epochs // config["epochs_before_validation_loss_saved"], len(types_of_loss)))
 
     mse_data = np.zeros(len(seeds))
 
-    MSE = nn.MSELoss()
     best_test_MSE = float("inf")
     best_model = None
 
@@ -221,6 +222,16 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
 
         print(f"Run {i + 1} / {len(seeds)} done")
         print(f"RMSE : {mse_data[i]:.2e} \n")
+
+    if config["save_model"]:
+        torch.save(best_model, f"models/" + filename + ".pth")
+
+    np.save("results/average_loss_" +
+            filename, np.vstack([results_train.mean(axis=0), results_train.std(axis=0)]))
+
+    np.save("results/average_validation_" +
+            filename, np.vstack([results_val.mean(axis=0), results_val.std(axis=0)]))
+    np.savetxt("results/rmse_data_" + filename + ".txt", mse_data)
 
 
 def trying_weight_decay(config: dict, dataloader, PDE, filename1: str, filename2: str, weight_decays: list, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 250_000):
