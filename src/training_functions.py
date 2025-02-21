@@ -54,8 +54,11 @@ def compute_test_loss(model, test_data: dict, dataloader, analytical_solution_fi
 
     with torch.no_grad():
         predicted_pde = model(X1_test_scaled).cpu().detach().numpy()
+
         predicted_expiry = model(expiry_x_tensor_test)
+
         predicted_lower = model(lower_x_tensor_test)
+
         predicted_upper = model(upper_x_tensor_test)
 
     RMSE = np.square(np.subtract(
@@ -275,12 +278,12 @@ def try_different_lambdas(config: dict, dataloader, PDE, filename1: str, filenam
                          N_LAYERS=4, use_fourier_transform=config["use_fourier_transform"], sigma_FF=config["sigma_fourier"], encoded_size=config["fourier_encoded_size"])
     start_model = copy.deepcopy(model.state_dict())
 
-    MSE = nn.MSELoss()
     for i, cur in enumerate(lambdas):
 
-        config["lambda_pde"] = cur[0]
-        config["lambda_boundary"] = cur[1]
-        config["lambda_expiry"] = cur[2]
+        cur_config["lambda_pde"] = cur[0]
+        cur_config["lambda_boundary"] = cur[1]
+        cur_config["lambda_expiry"] = cur[2]
+        # cur_config["lambda_exercise"] = cur[3]
 
         model.load_state_dict(start_model)
         model.train(True)

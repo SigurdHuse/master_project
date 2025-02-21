@@ -14,6 +14,7 @@ from data_generator import DataGeneratorAmerican1D, DataGeneratorEuropean1D
 from matplotlib.colors import LogNorm, SymLogNorm
 import experiments_european_one_dimensional as one_euro
 import experiments_american_one_dimensional as one_american
+from training_functions import compute_test_loss
 
 torch.set_default_device(DEVICE)
 
@@ -518,6 +519,8 @@ if __name__ == "__main__":
         2, 1, 128, 4, use_fourier_transform=True, sigma_FF=5.0, encoded_size=128)
     american_model.load_state_dict(torch.load(
         "models/american_multiple.pth", weights_only=True))
+    print(compute_test_loss(american_model, test_data,
+          dataloader_american, "data/test_data_american_1D.npy"))
 
     plot_heat_map_of_predicted_versus_analytical(
         american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy")
