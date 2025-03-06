@@ -4,7 +4,6 @@ import torch
 
 
 class DataLoaderEuropean(Dataset):
-
     def __init__(self, filename: str, config: dict):
         super(DataLoaderEuropean, self).__init__()
         self.filename = filename

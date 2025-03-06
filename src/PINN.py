@@ -56,7 +56,7 @@ class PINNforwards(nn.Module):
                 layers.append(nn.Linear(custom_arc[i-1], custom_arc[i]))
                 layers.append(self.activation())
 
-            print(layers)
+            # print(layers)
             self.output_layer = nn.Linear(custom_arc[-1], N_OUTPUT)
 
         self.hidden_layers = nn.Sequential(*layers)

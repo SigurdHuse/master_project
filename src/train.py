@@ -16,42 +16,64 @@ torch.set_default_device(DEVICE)
 
 
 def black_scholes_multi_dimensional(y_hat, X1, config):
-    sigma = config["sigma"]
+    # sigma = config["sigma"]
+    sigma = config["sigma_torch"]
     r = config["r"]
 
-    t = X1[:, 0].unsqueeze(1)  # Extract the first column as time t
-    # Extract the remaining columns as asset prices S
-    S = X1[:, 1:]
+    # t = X1[:, :1]   # shape: [N, 1]
+    S = X1[:, 1:]   # shape: [N, n]
+    N, n = S.shape
 
-    # Compute first derivatives
-    grads = torch.autograd.grad(outputs=y_hat, inputs=X1,
-                                grad_outputs=torch.ones_like(y_hat), create_graph=True)
-    # First derivative w.r.t. each asset price (ignore time dimension)
-    dV_dS = grads[0][:, 1:]
-    dV_dt = grads[0][:, 0].unsqueeze(1)  # First derivative w.r.t. time
+    # A tensor of ones for use as grad_outputs.
+    ones = torch.ones_like(y_hat)
 
-    # Compute second derivatives and cross terms
-    d2V_dS2 = torch.stack([torch.autograd.grad(dV_dS[:, i], X1, grad_outputs=torch.ones_like(dV_dS[:, i]), create_graph=True)[0][:, i+1]
-                           # Diagonal second derivatives w.r.t. each asset price
-                           for i in range(S.shape[1])], dim=1)
+    # Compute gradients of y_hat with respect to all components of X1.
+    # grad_all has shape [N, 1+n]: first column for t, remaining for S.
+    grad_all = torch.autograd.grad(
+        y_hat, X1, grad_outputs=ones, create_graph=True, retain_graph=True
+    )[0]
 
-    # Mixed second derivatives using correlation matrix
-    cross_term = torch.zeros_like(y_hat)
-    for i in range(S.shape[1]):
-        for j in range(i + 1, S.shape[1]):
-            d2V_dSij = torch.autograd.grad(dV_dS[:, i], X1, grad_outputs=torch.ones_like(
-                dV_dS[:, i]), create_graph=True)[0][:, j+1]
+    # Extract time derivative: ∂V/∂t (first column).
+    V_t = grad_all[:, :1]  # shape: [N, 1]
 
-            cross_term += (sigma[i, j] * S[:, i] *
-                           S[:, j] * d2V_dSij).view(-1, 1)
+    # Extract first derivatives with respect to asset prices: ∂V/∂S_i (columns 1 to end).
+    V_S = grad_all[:, 1:]  # shape: [N, n]
 
-    diffusion_term = 0.5 * torch.sum(torch.stack(
-        [sigma[i, i] * S[:, i]**2 * d2V_dS2[:, i] for i in range(S.shape[1])], dim=1), dim=1) + cross_term
+    # Compute second derivatives with respect to asset prices.
+    # We want V_SS[:, i,j] = ∂²V/(∂S_i ∂S_j) for i,j=1,...,n.
+    V_SS = torch.zeros(N, n, n, device=X1.device)
+    for i in range(n):
+        # Compute gradient of V_S[:, i] with respect to X1.
+        grad_i = torch.autograd.grad(
+            V_S[:, i:i+1], X1, grad_outputs=torch.ones_like(V_S[:, i:i+1]),
+            create_graph=True, retain_graph=True
+        )[0]
+        # The asset derivatives are in the columns 1: (ignoring time).
+        V_SS[:, i, :] = grad_i[:, 1:]
 
-    drift_term = r * torch.sum(S * dV_dS, dim=1)
-    bs_pde = dV_dt + diffusion_term + drift_term - r * y_hat.squeeze()
+    # First-order term: sum_i r * S_i * (∂V/∂S_i)
+    term1 = r * torch.sum(S * V_S, dim=1, keepdim=True)
 
-    return bs_pde
+    # print(V_SS.shape, S[:, 0].shape)
+    term2 = 0
+    for i in range(n):
+        for j in range(n):
+            sigma_eff = 0
+            for k in range(n):
+                sigma_eff += sigma[i, k] * sigma[j, k]
+
+            tmp = S[:, i]*S[:, j]
+            tmp *= V_SS[:, i, j]
+            tmp *= sigma_eff
+            term2 += tmp
+
+    term2 *= 0.5
+    term2 = term2.view(-1, 1)
+    # print(term2.shape, term1.shape, y_hat.shape, V_t.shape)
+    # PDE residual: V_t + (first-order term) + (second-order term) - r * V.
+    residual = V_t + term1 + term2 - r * y_hat
+    # print(torch.max(residual), torch.min(residual))
+    return residual
 
 
 def black_scholes_1D(y1_hat, X1, config):
@@ -69,7 +91,6 @@ def black_scholes_1D(y1_hat, X1, config):
     S1 = X1[:, 1].view(-1, 1)
     bs_pde = dVdt + (0.5 * ((sigma**2) * (S1 ** 2)) * d2VdS2) + \
         (r * S1 * dVdS) - (r * y1_hat)
-
     return bs_pde
 
 
@@ -94,10 +115,10 @@ def black_scholes_american_1D(y1_hat, X1, config):
 
     combined_pde = bs_pde * free_pde
 
-    # free_boundary = torch.clamp(y1_hat - yint, max=0)
-
+    free_boundary = torch.min(free_pde, torch.zeros_like(y1_hat))
+    # print(free_boundary)
     # print(type(combined_pde[1]))
-    return combined_pde
+    return combined_pde, free_boundary
 
 
 def create_validation_data(dataloader:
@@ -207,7 +228,7 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
 
     y1_hat = model(X1_scaled)
 
-    """ if config["american_option"]:
+    if config["american_option"]:
         bs_pde, free_boundary = PDE(y1_hat, X1, config)
 
         loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
@@ -215,13 +236,13 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
             free_boundary, torch.zeros_like(free_boundary))
         loss = loss_boundary + \
             config["lambda_pde"] * loss_pde + \
-            config["lambda_exercise"] * loss_free_boundary
-    else: """
-    bs_pde = PDE(y1_hat, X1, config)
+            config["lambda_pde"] * loss_free_boundary
+    else:
+        bs_pde = PDE(y1_hat, X1, config)
 
-    loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
-    # Backpropagate joint loss
-    loss = loss_boundary + config["lambda_pde"] * loss_pde
+        loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
+        # Backpropagate joint loss
+        loss = loss_boundary + config["lambda_pde"] * loss_pde
 
     optimizer.zero_grad()
     loss.backward()
@@ -234,6 +255,9 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
     mse_lower = mse_lower.to("cpu").detach()
     mse_upper = mse_upper.to("cpu").detach()
 
+    if config["american_option"]:
+        loss_free_boundary = loss_free_boundary.to("cpu").detach()
+
     if config["epoch"] % config["epochs_before_loss_saved"] == 0:
         loss_history["total_loss"].append(
             mse_expiry.item() + mse_lower.item() + mse_upper.item() + loss_pde.item())
@@ -244,6 +268,9 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
         loss_history["loss_lower"].append(mse_lower.item())
         loss_history["loss_upper"].append(mse_upper.item())
 
+        if config["american_option"]:
+            loss_history["loss_free_boundary"].append(
+                loss_free_boundary.item())
     """ if config["epoch"] % config["update_lambda"] == 0:
         # We have to divide by 2 to get the MSE of the boundary condition
         mse_boundary = (mse_lower.item() + mse_upper.item())/2
@@ -278,7 +305,7 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
     scheduler_step = int(nr_of_epochs // n)
 
     # Make sure we do not modulo w.r.t 0
-    if scheduler_step == 0:
+    if scheduler_step <= 0:
         scheduler_step = nr_of_epochs
 
     optimizer = torch.optim.Adam(
@@ -288,6 +315,9 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
 
     types_of_loss = ["total_loss", "loss_boundary",
                      "loss_pde", "loss_expiry", "loss_lower", "loss_upper"]
+    if config["american_option"]:
+        types_of_loss = types_of_loss + ["loss_free_boundary"]
+
     loss_history = {i: [] for i in types_of_loss}
     loss_history_validation = {i: [] for i in types_of_loss}
 
@@ -341,24 +371,27 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
                     upper_y_tensor_validation, upper_y_pred)
 
                 # We have to divide by 2 to get the MSE of the boundary condition
-                loss_boundary = mse_expiry + (mse_lower + mse_upper)/2
+                loss_boundary = config["lambda_expiry"] * \
+                    mse_expiry + config["lambda_boundary"] * \
+                    (mse_lower + mse_upper)/2
 
             y1_hat = model(X1_validation_scaled)
 
-            """ if config["american_option"]:
+            if config["american_option"]:
                 bs_pde, free_boundary = PDE(y1_hat, X1_validation, config)
 
                 loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
                 loss_free_boundary = loss_function(
                     free_boundary, torch.zeros_like(free_boundary))
 
-                loss_pde = loss_pde + loss_free_boundary
+                loss_pde = config["lambda_pde"]*loss_pde + \
+                    config["lambda_pde"]*loss_free_boundary
 
                 loss = loss_boundary + loss_pde
-            else: """
-            bs_pde = PDE(y1_hat, X1_validation, config)
-            loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
-            loss = loss_boundary + loss_pde
+            else:
+                bs_pde = PDE(y1_hat, X1_validation, config)
+                loss_pde = loss_function(bs_pde, torch.zeros_like(bs_pde))
+                loss = loss_boundary + loss_pde
 
             # Make sure the validation prediction does not affect the training
             optimizer.zero_grad()
@@ -372,6 +405,9 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
 
             bs_pde = bs_pde.to("cpu").detach()
 
+            if config["american_option"]:
+                loss_free_boundary = loss_free_boundary.to("cpu").detach()
+
             if epoch % config["epochs_before_validation_loss_saved"] == 0:
                 loss_history_validation["total_loss"].append(loss.item())
                 loss_history_validation["loss_boundary"].append(
@@ -381,6 +417,10 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
                     mse_expiry.item())
                 loss_history_validation["loss_lower"].append(mse_lower.item())
                 loss_history_validation["loss_upper"].append(mse_upper.item())
+
+                if config["american_option"]:
+                    loss_history_validation["loss_free_boundary"].append(
+                        loss_free_boundary.item())
 
             if loss.item() < best_validation:
                 best_validation = loss.item()

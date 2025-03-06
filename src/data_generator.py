@@ -3,6 +3,7 @@ import torch
 from scipy.stats import qmc
 from tqdm import tqdm
 from torch.distributions import Normal
+from scipy.stats import norm
 
 # TODO write my own American 1D analytical solution
 
@@ -15,6 +16,7 @@ class DataGeneratorEuropean1D:
         self.sigma = sigma
         self.K = K
         self.DEVICE = DEVICE
+
         self.sampler_2D = qmc.LatinHypercube(d=2, seed=seed)
         self.sampler_1D = qmc.LatinHypercube(d=1, seed=seed)
 
@@ -82,21 +84,26 @@ class DataGeneratorEuropean1D:
         return lower_x_tensor.to(self.DEVICE), lower_y_tensor.to(self.DEVICE), upper_x_tensor.to(self.DEVICE), upper_y_tensor.to(self.DEVICE)
 
     def get_analytical_solution(self, S, t):
-        T = self.time_range[-1]
-        t2m = T-t  # Time to maturity
-        d1 = (torch.log(S / self.K) + (self.r + 0.5 * self.sigma**2)
-              * t2m) / (self.sigma * torch.sqrt(t2m))
+        tmp_S = S.cpu().detach().numpy().flatten()
+        tmp_t = t.cpu().detach().numpy()
 
-        d2 = d1 - self.sigma * torch.sqrt(t2m)
+        T = self.time_range[-1]
+        t2m = T-tmp_t  # Time to maturity
+        t2m = t2m.flatten()
+
+        d1 = (np.log(tmp_S / self.K) + (self.r + 0.5 * self.sigma**2)
+              * t2m) / (self.sigma * np.sqrt(t2m))
+
+        d2 = d1 - self.sigma * np.sqrt(t2m)
 
         # Normal cumulative distribution function (CDF)
-        standard_normal = Normal(0, 1)
+        normal = norm(loc=0, scale=1)
 
-        Nd1 = standard_normal.cdf(d1)
-        Nd2 = standard_normal.cdf(d2)
+        Nd1 = normal.cdf(d1)
+        Nd2 = normal.cdf(d2)
 
         # Calculate the option price
-        F = S * Nd1 - self.K * Nd2 * torch.exp(-self.r * t2m)
+        F = tmp_S * Nd1 - self.K * Nd2 * np.exp(-self.r * t2m)
         return F
 
     def normalize(self, X):
@@ -108,15 +115,29 @@ class DataGeneratorEuropean1D:
 
 
 class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
-    def __init__(self, time_range: list, S_range: np.array, K: float, r: float, sigma: float, DEVICE: torch.device):
+    def __init__(self, time_range: list, S_range: np.array, K: float, r: float, sigma: np.array, DEVICE: torch.device, seed=2024):
         self.time_range = time_range
         self.S_range = S_range
+        self.N = len(S_range)
         self.r = r
         self.sigma = sigma
+        self.sigma_torch = torch.tensor(sigma).to(DEVICE)
+        # self.cov = torch.tensor(sigma@sigma.T).to(DEVICE)
         self.K = K
         self.DEVICE = DEVICE
-
         self.S_range_mean = np.exp(np.mean(np.log(S_range[:, 1])))
+
+        self.scaler_min = [self.time_range[0]] + [S[0] for S in self.S_range]
+        self.scaler_max = [self.time_range[1]] + [S[1] for S in self.S_range]
+
+        self.min_values = torch.tensor(
+            [self.time_range[0]] + [S[0] for S in self.S_range]).to(self.DEVICE)
+        self.max_values = torch.tensor(
+            [self.time_range[1]] + [S[1] for S in self.S_range]).to(self.DEVICE)
+
+        self.sampler_multi = qmc.LatinHypercube(d=self.N + 1, seed=seed)
+        self.sampler_no_time = qmc.LatinHypercube(d=self.N, seed=seed)
+        self.sampler_1D = qmc.LatinHypercube(d=1, seed=seed)
 
     def option_function(self, X):
         # Geometric mean basket option
@@ -126,77 +147,82 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
         return np.fmax(geometric_mean - self.K, 0)
 
     def get_pde_data(self, n):
-        X = np.random.uniform(*self.time_range, (n, 1))
-
-        for i in range(len(self.S_range)):
-            X = np.concatenate(
-                [X, np.random.uniform(*self.S_range[i], (n, 1)) + 1e-7], axis=1)
-        y = np.zeros((n, 1))  # price
+        X = self.sampler_multi.random(n=n)
+        X = qmc.scale(X, self.scaler_min, self.scaler_max)
+        y = np.zeros((n, 1))
         return X, y
 
-    def get_expiry_time_data(self, n, r):
-        X = np.ones((int(r*n), 1))
+    def get_expiry_time_data(self, n, w=1):
+        sample = self.sampler_no_time.random(n=int(w*n))
+        sample = qmc.scale(sample, self.scaler_min[1:], self.scaler_max[1:])
 
-        for i in range(len(self.S_range)):
-            X = np.concatenate(
-                [X, np.random.uniform(*self.S_range[i], (int(r*n), 1)) + 1e-7], axis=1)
-
-        # X = torch.from_numpy(X).float().to(self.DEVICE)
+        X = np.concatenate([np.ones((int(w*n), 1))*self.time_range[1],  # all at expiry time
+                            sample], axis=1)
         y = self.option_function(X[:, 1:]).reshape(-1, 1)
+
         return X, y
 
-    def get_boundary_data(self, n, r1=1, r2=1):
+    def get_boundary_data(self, n, w1=1, w2=1):
         T = self.time_range[-1]
-        lower_X = np.random.uniform(*self.time_range, (int(n*r1), 1))
+        lower_sample = self.sampler_1D.random(n=int(n*w1))
+        lower_X = qmc.scale(
+            lower_sample, [self.time_range[0]], [self.time_range[1]])
 
-        for i in range(len(self.S_range)):
+        for i in range(self.N):
             lower_X = np.concatenate(
-                [lower_X, self.S_range[i][0] * np.ones((int(n*r1), 1))], axis=1)
+                [lower_X, self.S_range[i][0] * np.ones((int(n*w1), 1))], axis=1)
 
-        lower_y = np.zeros((int(n*r1), 1))
+        lower_y = np.zeros((int(w1*n), 1))
 
-        upper_X = np.random.uniform(*self.time_range, (int(r2*n), 1))
+        upper_sample = self.sampler_1D.random(n=int(w2*n))
+        upper_X = qmc.scale(
+            upper_sample, [self.time_range[0]], [self.time_range[1]])
 
         for i in range(len(self.S_range)):
             upper_X = np.concatenate(
-                [upper_X, self.S_range[i][-1] * np.ones((int(r2*n), 1))], axis=1)
+                [upper_X, self.S_range[i][-1] * np.ones((int(w2*n), 1))], axis=1)
 
-        upper_y = (self.S_range_mean - self.K*np.exp(-self.r *
-                                                     (T-upper_X[:, 0].reshape(-1)))).reshape(-1, 1)
+        upper_y = self.S_range_mean - self.K * \
+            np.exp(-self.r * (T-upper_X[:, 0].reshape(-1))).reshape(-1, 1)
+
         return lower_X, lower_y, upper_X, upper_y
 
     def get_analytical_solution(self, S, t):
-        sigma_bar = np.sqrt(np.sum(np.sum(self.sigma))) / len(self.sigma)
-        sigma_diag = np.sum(np.diag(self.sigma)**2)/(2 * len(self.sigma))
-        log_S = torch.log(S)
-        geometric_mean = torch.exp(torch.mean(log_S, dim=0))
+        tmp_S = S.cpu().detach().numpy()
+        tmp_t = t.cpu().detach().numpy()
+
+        G = np.exp(np.mean(np.log(tmp_S), axis=1)).flatten()
+
         T = self.time_range[-1]
+        t2m = T-tmp_t  # Time to maturity
+        t2m = t2m.flatten()
 
-        F_t = geometric_mean * \
-            torch.exp((self.r - sigma_diag)*(T - t) +
-                      sigma_bar**2 * (T - t) / 2)
+        sigma_eff_sq = 0
 
-        t2m = T-t  # Time to maturity
-        d1 = (torch.log(F_t / self.K) + (self.r + 0.5 * sigma_bar**2)
-              * t2m) / (sigma_bar * torch.sqrt(t2m))
+        for j in range(self.N):
+            sigma_eff_sq += np.sum(self.sigma[:, j])**2
+        sigma_eff_sq /= self.N**2
 
-        d2 = d1 - sigma_bar * torch.sqrt(t2m)
-
+        sigma_eff = np.sqrt(sigma_eff_sq)
+        # print(G, self.K, self.r, sigma_eff_sq, t2m)
+        d1 = (np.log(G / self.K) + (self.r + 0.5 * sigma_eff_sq)
+              * t2m) / (sigma_eff * np.sqrt(t2m))
+        d2 = d1 - sigma_eff * np.sqrt(t2m)
+        # print(d1.shape, d2.shape)
         # Normal cumulative distribution function (CDF)
-        def N0(value): return 0.5 * (1 + torch.erf(value / (2**0.5)))
-        Nd1 = N0(d1)
-        Nd2 = N0(d2)
 
-        # Calculate the option price
-        F = F_t * Nd1 - self.K * Nd2 * torch.exp(-self.r * t2m)
-        return F
+        # Standard normal cumulative distribution function.
+        normal = norm(loc=0, scale=1)
+        Phi_d1 = normal.cdf(d1)
+        Phi_d2 = normal.cdf(d2)
 
-    def normalize(self, X):
-        min_values = torch.tensor(
-            [self.time_range[0]] + [t[0] for t in self.S_range]).to(self.DEVICE)
-        max_values = torch.tensor(
-            [self.time_range[1]] + [t[1] for t in self.S_range]).to(self.DEVICE)
-        return (X - min_values) / (max_values - min_values)
+        # Compute the analytical option price.
+        price = G * Phi_d1 - self.K * np.exp(-self.r * t2m) * Phi_d2
+        return price
+
+    def normalize(self, X: torch.tensor):
+        res = (X - self.min_values) / (self.max_values - self.min_values)
+        return res
 
 
 class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
@@ -205,16 +231,14 @@ class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
         return np.fmax(self.K - X, 0)
 
     def get_boundary_data(self, n, w1=1, w2=1):
-        T = self.time_range[-1]
-
         lower_sample = self.sampler_1D.random(n=int(n*w1))
         lower_sample = qmc.scale(
             lower_sample, [self.time_range[0]], [self.time_range[1]])
         lower_X = np.concatenate([lower_sample,
                                   self.S_range[0] * np.ones((int(w1*n), 1))], axis=1)
 
-        lower_y = self.K * np.ones((int(n*w1), 1)) * \
-            np.exp(- self.r * (T - lower_X[:, 0].reshape(-1))).reshape(-1, 1)
+        lower_y = self.K * np.ones((int(n*w1), 1))  # * \
+        # np.exp(- self.r * (T - lower_X[:, 0].reshape(-1))).reshape(-1, 1)
 
         upper_sample = self.sampler_1D.random(n=int(w2*n))
         upper_sample = qmc.scale(
@@ -242,5 +266,5 @@ class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
 
     def get_analytical_solution(self, S, t, M=1024):
         res = np.array([self._compute_analytical_solution(
-            S[i], t[i], M=M) for i in tqdm(range(len(S)), miniters=10_000, maxinterval=10_000)])
+            S[i], t[i], M=M) for i in tqdm(range(len(S)), miniters=1_000, maxinterval=1_000)])
         return res

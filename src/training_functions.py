@@ -41,7 +41,7 @@ def compute_test_loss(model, test_data: dict, dataloader, analytical_solution_fi
 
     if analytical_solution_filename is None:
         analytical_solution = dataloader.get_analytical_solution(
-            X1_test[:, 1], X1_test[:, 0]).cpu().detach().numpy()
+            X1_test[:, 1:], X1_test[:, 0])  # .cpu().detach().numpy()
     else:
         analytical_solution = np.load(analytical_solution_filename)
 
@@ -111,14 +111,20 @@ def try_multiple_activation_functions(config: dict, dataloader, PDE, filename1: 
     np.savetxt(filename2, used_epochs)
 
 
-def try_different_learning_rates(config: dict, dataloader, PDE, filename1: str, filename2: str, learning_rates: list, batch_sizes: list, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 600_000):
+def try_different_learning_rates(config: dict, dataloader, PDE, filename1: str, filename2: str, learning_rates: list, batch_sizes: list, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 600_000, custom_arc: list[int] = None):
     cur_config = copy.deepcopy(config)
 
     epoch_data = np.zeros((len(learning_rates), len(batch_sizes)))
     mse_data = np.zeros((len(learning_rates), len(batch_sizes)))
 
-    model = PINNforwards(N_INPUT=config["N_INPUT"], N_OUTPUT=1, N_HIDDEN=128,
-                         N_LAYERS=4, use_fourier_transform=config["use_fourier_transform"], sigma_FF=config["sigma_fourier"], encoded_size=config["fourier_encoded_size"])
+    if custom_arc is None:
+        model = PINNforwards(N_INPUT=config["N_INPUT"], N_OUTPUT=1, N_HIDDEN=128,
+                             N_LAYERS=4, use_fourier_transform=config["use_fourier_transform"], sigma_FF=config["sigma_fourier"], encoded_size=config["fourier_encoded_size"])
+    else:
+        model = PINNforwards(N_INPUT=config["N_INPUT"], N_OUTPUT=1, N_HIDDEN=None, N_LAYERS=None,
+                             use_fourier_transform=config["use_fourier_transform"], sigma_FF=config["sigma_fourier"],
+                             encoded_size=config["fourier_encoded_size"], custom_arc=custom_arc)
+
     start_model = copy.deepcopy(model.state_dict())
 
     for i, learning_rate in enumerate(learning_rates):
@@ -183,6 +189,8 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
 
     types_of_loss = ["total_loss", "loss_boundary",
                      "loss_pde", "loss_expiry", "loss_lower", "loss_upper"]
+    if config["american_option"]:
+        types_of_loss = types_of_loss + ["loss_free_boundary"]
 
     results_train = np.zeros(
         (len(seeds), nr_of_epochs // config["epochs_before_loss_saved"], len(types_of_loss)))
@@ -201,7 +209,7 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
                              use_fourier_transform=config["use_fourier_transform"], sigma_FF=config["sigma_fourier"],
                              encoded_size=config["fourier_encoded_size"], custom_arc=custom_arc)
 
-        train(model, nr_of_epochs, config["learning_rate"], dataloader, cur_config, str(
+        _ = train(model, nr_of_epochs, config["learning_rate"], dataloader, cur_config, str(
             seed), PDE, validation_data)
 
         cur_train = np.load(f"results/loss_{seed}.npy")

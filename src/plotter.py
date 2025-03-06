@@ -301,7 +301,7 @@ def binomial_plot(filename):
 
     ax[0].plot(M_values[1:], rmse[1:], label="RMSE", color="midnightblue")
     ax[0].plot(M_values[1:], 1 / M_values[1:],
-               label=r"$O(n^{-1})$", color="red")
+               label=r"$O(M^{-1})$", color="red")
     ax[0].set_yscale('log')
     ax[0].set_xscale("log")
     ax[0].set_ylabel("RMSE")
@@ -310,7 +310,8 @@ def binomial_plot(filename):
     ax[0].grid()
 
     ax[1].plot(M_values, timings, label="Run time", color="midnightblue")
-    ax[1].plot(M_values, M_values, label=r"$O(n)$", color="red")
+    ax[1].plot(M_values, M_values**2,
+               label=r"$O(M^2)$", color="red")
     ax[1].set_yscale('log')
     ax[1].set_xscale("log")
     ax[1].set_ylabel("Run time [s]")
@@ -463,8 +464,8 @@ if __name__ == "__main__":
     # plt.clf()
     # make_training_plot("plots/fourier_loss.pdf")
     # plt.clf()
-    """ binomial_plot("plots/binomial.pdf")
-    plt.clf() """
+    binomial_plot("plots/binomial.pdf")
+    plt.clf()
 
     """ plots_greeks(10_000, 0.5, "models/greeks.pth",
                  "plots/one_dim_european_greeks.pdf") """
@@ -503,8 +504,8 @@ if __name__ == "__main__":
     plot_heat_map_of_predicted_versus_analytical(
         small_model, test_data, dataloader, "plots/small_model.jpg") """
 
-    torch.manual_seed(2026)
-    np.random.seed(2026)
+    """ torch.manual_seed(2025)
+    np.random.seed(2025)
     dataloader_american = DataGeneratorAmerican1D(
         time_range=one_american.config["t_range"], S_range=one_american.config["S_range"],
         K=one_american.config["K"], r=one_american.config["r"], sigma=one_american.config["sigma"], DEVICE=DEVICE)
@@ -523,4 +524,4 @@ if __name__ == "__main__":
           dataloader_american, "data/test_data_american_1D.npy"))
 
     plot_heat_map_of_predicted_versus_analytical(
-        american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy")
+        american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy") """
