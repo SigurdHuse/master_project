@@ -159,7 +159,6 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
         X = np.concatenate([np.ones((int(w*n), 1))*self.time_range[1],  # all at expiry time
                             sample], axis=1)
         y = self.option_function(X[:, 1:]).reshape(-1, 1)
-
         return X, y
 
     def get_boundary_data(self, n, w1=1, w2=1):
@@ -199,11 +198,15 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
 
         sigma_eff_sq = 0
 
-        for j in range(self.N):
-            sigma_eff_sq += np.sum(self.sigma[:, j])**2
-        sigma_eff_sq /= self.N**2
+        for i in range(self.N):
+            tmp = 0
+            for j in range(self.N):
+                tmp += self.sigma[i, j]
+            sigma_eff_sq += tmp**2
 
+        sigma_eff_sq /= self.N**2
         sigma_eff = np.sqrt(sigma_eff_sq)
+        print(sigma_eff_sq)
         # print(G, self.K, self.r, sigma_eff_sq, t2m)
         d1 = (np.log(G / self.K) + (self.r + 0.5 * sigma_eff_sq)
               * t2m) / (sigma_eff * np.sqrt(t2m))

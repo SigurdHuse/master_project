@@ -22,13 +22,13 @@ config["use_fourier_transform"] = False
 config["sigma_fourier"] = 5.0
 config["fourier_encoded_size"] = 128
 
-config["w_expiry"] = 1
+config["w_expiry"] = 2
 config["w_lower"] = 1
 config["w_upper"] = 1
 
 config["weight_decay"] = 0
 config["gamma"] = 0.99
-config["scheduler_step"] = 1_000
+# config["scheduler_step"] = 1_000
 
 config["N_sample"] = 512
 config["lambda_pde"] = 1
@@ -39,15 +39,15 @@ config["lambda_expiry"] = 1
 
 config["K"] = 30
 config["t_range"] = [0, 1]
-config["S_range"] = np.array([[0, 400],
-                              [0, 500],
-                              [0, 600],
-                              [0, 400]])
+config["S_range"] = np.array([[0, 6_00],
+                              [0, 6_00],
+                              [0, 6_00],
+                              [0, 6_00]])
 
-config["sigma"] = np.array([[1, 0.0, 0.5, 0.0],
-                            [0.0, 1, 0.3, 0.2],
-                            [0.5, 0.3, 1, 0.1],
-                            [0.0, 0.2, 0.1, 1]])
+config["sigma"] = np.array([[1.0, 0.3, 0.5, 0.4],
+                            [1.0, 1.0, 0.3, 0.2],
+                            [0.1, 0.3, 2.0, 0.1],
+                            [0.4, 0.2, 1.0, 0.3]])
 config["sigma_torch"] = torch.tensor(config["sigma"]).to(DEVICE)
 # config["cov"] = config["sigma"]@config["sigma"].T
 # config["cov_torch"] = torch.tensor(config["cov"]).to(DEVICE)
@@ -55,7 +55,7 @@ config["r"] = 0.04
 
 config["learning_rate"] = 1e-3
 config["save_model"] = False
-config["save_loss"] = True
+config["save_loss"] = False
 config["epochs_before_validation"] = 30
 
 # config["epochs_before_validation"]
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     test_data = create_validation_data(
         dataloader=dataloader, N_validation=20_000, config=config)
 
-    torch.manual_seed(2025)
+    """ torch.manual_seed(2025)
     np.random.seed(2025)
     config["save_model"] = True
     dataloader = DataGeneratorEuropeanMultiDimensional(
@@ -82,17 +82,17 @@ if __name__ == "__main__":
     try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_multi_dimensional,
                                  filename1="important_results/european_multi/RMSE_test.txt", filename2="important_results/european_multi/epoch_test.txt",
                                  learning_rates=[1e-3], batch_sizes=[512],
-                                 validation_data=validation_data, test_data=test_data, epochs=600_000)
-    config["save_model"] = False
+                                 validation_data=validation_data, test_data=test_data, epochs=300_000, custom_arc=[64, 64, 64])
+    config["save_model"] = False """
 
-    """ torch.manual_seed(2025)
+    torch.manual_seed(2025)
     np.random.seed(2025)
     dataloader = DataGeneratorEuropeanMultiDimensional(
         time_range=config["t_range"], S_range=config["S_range"], K=config["K"], r=config["r"], sigma=config["sigma"], DEVICE=DEVICE, seed=2025)
     try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_multi_dimensional,
                                  filename1="important_results/european_multi/RMSE_lr_first.txt", filename2="important_results/european_multi/epoch_lr_first.txt",
                                  learning_rates=[1e-3, 5e-3, 5e-4], batch_sizes=[256, 512, 1024],
-                                 validation_data=validation_data, test_data=test_data, epochs=600_000) """
+                                 validation_data=validation_data, test_data=test_data, epochs=800_000)
 
     """ torch.manual_seed(2025)
     np.random.seed(2025)

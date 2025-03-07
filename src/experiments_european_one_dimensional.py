@@ -62,22 +62,22 @@ if __name__ == "__main__":
     test_data = create_validation_data(
         dataloader=dataloader, N_validation=20_000, config=config)
 
-    torch.manual_seed(2025)
+    """ torch.manual_seed(2025)
     np.random.seed(2025)
     dataloader = DataGeneratorEuropean1D(
         time_range=config["t_range"], S_range=config["S_range"], K=config["K"], r=config["r"], sigma=config["sigma"], DEVICE=DEVICE, seed=2025)
     try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
                                  filename1="important_results/european_1D/RMSE_lr_first.txt", filename2="important_results/european_1D/epoch_lr_first.txt",
                                  learning_rates=[5e-3, 1e-3, 5e-4], batch_sizes=[256, 512, 1024, 2048, 4096],
-                                 validation_data=validation_data, test_data=test_data, epochs=600_000)
+                                 validation_data=validation_data, test_data=test_data, epochs=600_000) """
 
-    torch.manual_seed(2025)
+    """ torch.manual_seed(2025)
     np.random.seed(2025)
     dataloader = DataGeneratorEuropean1D(
         time_range=config["t_range"], S_range=config["S_range"], K=config["K"], r=config["r"], sigma=config["sigma"], DEVICE=DEVICE, seed=2025)
     try_sigma_fourier_and_embedding_size(config=config, dataloader=dataloader, PDE=black_scholes_1D,
                                          filename1="important_results/european_1D/RMSE_fourier.txt", filename2="important_results/european_1D/epoch_fourier.txt",
-                                         sigma_fourier=[1.0, 5.0, 10.0], embedding_size=[32, 64, 128, 256, 512], validation_data=validation_data, test_data=test_data, epochs=600_000)
+                                         sigma_fourier=[1.0, 5.0, 10.0], embedding_size=[32, 64, 128, 256, 512], validation_data=validation_data, test_data=test_data, epochs=600_000) """
 
     config["epochs_before_validation_loss_saved"] = 600
     config["epochs_before_loss_saved"] = 600
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     dataloader = DataGeneratorEuropean1D(
         time_range=config["t_range"], S_range=config["S_range"], K=config["K"], r=config["r"], sigma=config["sigma"], DEVICE=DEVICE, seed=2025)
     train_multiple_times(seeds=list(range(1, 10 + 1)), layers=0, nodes=0, PDE=black_scholes_1D, filename="no_fourier",
-                         nr_of_epochs=600_000, dataloader=dataloader, config=config, validation_data=validation_data, test_data=test_data, custom_arc=[256, 128, 128, 128, 128])
+                         nr_of_epochs=600_000, dataloader=dataloader, config=config, validation_data=validation_data, test_data=test_data, custom_arc=[256, 128, 128, 128, 128, 128])
     config["use_fourier_transform"] = True
 
     dataloader = DataGeneratorEuropean1D(
