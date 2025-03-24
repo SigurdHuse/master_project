@@ -9,6 +9,7 @@ import os
 from torch.distributions import Normal
 import time
 import datetime as dt
+from train import create_validation_data
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(DEVICE)
@@ -435,3 +436,55 @@ def experiment_with_binomial_model(M_values: list[int], dataloader, test_data, f
 
     np.savetxt(filename1, error)
     np.savetxt(filename2, timings)
+
+
+def try_multiple_dimensions(dimensions: list, config, PDE, filename1: str, filename2: str):
+    cur_config = copy.deepcopy(config)
+
+    epoch_data = np.zeros((1, len(dimensions)))
+    rmse_data = np.zeros((1, len(dimensions)))
+
+    for i, d in enumerate(dimensions):
+        cur_S_range = np.array([[0, 20] for i in range(d)])
+        cur_sigma = np.full((d, d), 0.15)
+
+        cur_config["sigma"] = cur_sigma
+        cur_config["sigma_torch"] = torch.tensor(
+            cur_config["sigma"]).to(DEVICE)
+        cur_config["S_range"] = cur_S_range
+        cur_config["N_INPUT"] = d + 1
+        # print(cur_S_range)
+        # print(cur_sigma)
+
+        dataloader_val = DataGeneratorEuropeanMultiDimensional(
+            time_range=config["t_range"], S_range=cur_S_range, K=cur_config["K"], r=cur_config["r"], sigma=cur_sigma, DEVICE=DEVICE, seed=2024)
+        validation_data = create_validation_data(
+            dataloader=dataloader_val, N_validation=1024, config=cur_config)
+
+        test_data = create_validation_data(
+            dataloader=dataloader_val, N_validation=20_000, config=cur_config)
+
+        torch.manual_seed(2025)
+        np.random.seed(2025)
+        dataloader = DataGeneratorEuropeanMultiDimensional(
+            time_range=config["t_range"], S_range=cur_S_range, K=cur_config["K"], r=cur_config["r"], sigma=cur_sigma, DEVICE=DEVICE, seed=2025)
+
+        model = PINNforwards(N_INPUT=d + 1, N_OUTPUT=1, N_HIDDEN=128,
+                             N_LAYERS=4, use_fourier_transform=cur_config["use_fourier_transform"], sigma_FF=cur_config["sigma_fourier"], encoded_size=cur_config["fourier_encoded_size"])
+
+        model.train(True)
+        best_epoch = train(
+            model, 800_000, config["learning_rate"], dataloader, cur_config, f"d_{d}", PDE, validation_data)
+
+        model.train(False)
+        model.eval()
+
+        rmse_data[0, i] = compute_test_loss(
+            model=model, test_data=test_data, dataloader=dataloader, analytical_solution_filename=None)
+
+        epoch_data[0, i] = best_epoch
+
+        print(f"Trial {i + 1} /  {len(dimensions)} Done")
+        print("RMSE", rmse_data[0, i])
+    np.savetxt(filename1, rmse_data)
+    np.savetxt(filename2, epoch_data)

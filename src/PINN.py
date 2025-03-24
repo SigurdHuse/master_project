@@ -9,7 +9,7 @@ torch.set_default_device(DEVICE)
 
 class PINNforwards(nn.Module):
     def __init__(self, N_INPUT, N_OUTPUT, N_HIDDEN, N_LAYERS, activation_function=nn.Tanh,
-                 use_fourier_transform: bool = True, sigma_FF: float = 1.0, encoded_size: int = 128, custom_arc: list[int] = None):
+                 use_fourier_transform: bool = True, sigma_FF: float = 1.0, encoded_size: int = 128, custom_arc=None):
         super(PINNforwards, self).__init__()
 
         print("Training model with: ")

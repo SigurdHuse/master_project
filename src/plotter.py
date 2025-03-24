@@ -59,11 +59,11 @@ def make_training_plot(filename: str):
 
     n_val = X_validation_fourier.shape[0]
 
-    skip = 0
-    plot_every = 2_000
-    x_loss = np.arange(skip, n_loss//2, plot_every)
+    skip = 100
+    plot_every = 1
+    x_loss = np.arange(600*skip, n_loss//2 * 600, 600*plot_every)
 
-    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
 
     ax[0].plot(x_loss, X_loss_fourier[skip:n_loss//2:plot_every, 0],
                label="Fourier", color="midnightblue")
@@ -74,9 +74,10 @@ def make_training_plot(filename: str):
     ax[0].legend()
     ax[0].set_title("Training loss")
     ax[0].grid()
+    ax[0].ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
 
-    plot_every = 100
-    x_val = np.arange(skip, n_loss//2, 30*plot_every)
+    plot_every = 1
+    x_val = np.arange(600*skip, n_val//2 * 600, 600*plot_every)
 
     ax[1].plot(x_val, X_validation_fourier[skip:n_val//2:plot_every,
                0], label="Fourier", color="midnightblue")
@@ -87,6 +88,7 @@ def make_training_plot(filename: str):
     # as[1].legend()
     ax[1].set_title("Validation loss")
     ax[1].grid()
+    ax[1].ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
 
     fig.tight_layout()
     plt.savefig(filename)
@@ -297,7 +299,7 @@ def binomial_plot(filename):
     M_values = np.array([32, 64, 128, 256, 384, 512, 768,
                         1024, 1280, 1536, 1792, 2048])
 
-    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
+    fig, ax = plt.subplots(1, 2, figsize=(9, 3))
 
     ax[0].plot(M_values[1:], rmse[1:], label="RMSE", color="midnightblue")
     ax[0].plot(M_values[1:], 1 / M_values[1:],
@@ -350,7 +352,7 @@ def make_3D_american_plot(filename, X):
     plt.savefig(filename)
 
 
-def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, values_to_skip=100, skip_every=5, use_average=False):
+def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, values_to_skip=100, skip_every=5, use_average=False, american=False):
     if use_average:
         X_loss = np.load(f"results/average_loss_{name_of_model}.npy")
         X_loss = X_loss[: X_loss.shape[0] // 2]
@@ -361,28 +363,34 @@ def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, v
         X_loss = np.load(f"results/loss_{name_of_model}.npy")
         X_validation = np.load(f"results/validation_{name_of_model}.npy")
 
-    fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
 
     ax[0].plot(x_values[values_to_skip::skip_every], X_loss[values_to_skip::skip_every, 0],
-               label="Loss", color="midnightblue")
+               label="Training loss", color="midnightblue")
     ax[0].plot(x_values[values_to_skip::skip_every], X_validation[values_to_skip::skip_every, 0],
-               linestyle=(0, (4, 4)), label="Validation", color="red")
+               linestyle=(0, (4, 4)), label="Validation loss", color="red")
     ax[0].set_yscale("log")
     # ax[0].set_xscale("log")
     ax[0].set_xlabel("epoch")
     ax[0].legend()
     ax[0].grid()
+    ax[0].ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
 
-    ax[1].plot(x_values[values_to_skip::skip_every],
-               X_loss[values_to_skip::skip_every, 4], label="loss_lower")
-    ax[1].plot(x_values[values_to_skip::skip_every],
-               X_loss[values_to_skip::skip_every, 5], label="loss_upper")
     ax[1].plot(x_values[values_to_skip::5],
-               X_loss[values_to_skip::skip_every, 2], label="loss_pde")
+               X_loss[values_to_skip::skip_every, 2], label="PDE")
     ax[1].plot(x_values[values_to_skip::5],
-               X_loss[values_to_skip::skip_every, 3], label="loss_expiry")
+               X_loss[values_to_skip::skip_every, 3], label="Expiry")
+    ax[1].plot(x_values[values_to_skip::skip_every],
+               X_loss[values_to_skip::skip_every, 4], label="Lower")
+    ax[1].plot(x_values[values_to_skip::skip_every],
+               X_loss[values_to_skip::skip_every, 5], label="Upper")
+
+    if american:
+        ax[1].plot(x_values[values_to_skip::skip_every],
+                   X_loss[values_to_skip::skip_every, 6], label="Free boundary")
     ax[1].grid()
     ax[1].set_xlabel("epoch")
+    ax[1].ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
     # plt.plot(X_loss[100::5, 0], label = "Loss")
 
     ax[1].legend()
@@ -391,7 +399,7 @@ def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, v
     plt.savefig(filename)
 
 
-def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.tensor], dataloader, filename, analytical_solution_filename: str = None):
+def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.tensor], dataloader, filename, analytical_solution_filename: str = None, model2: PINNforwards = None):
     X1_test = test_data["X1_validation"]
     X1_test_scaled = test_data["X1_validation_scaled"]
 
@@ -409,7 +417,7 @@ def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.te
 
     if analytical_solution_filename is None:
         analytical_solution = dataloader.get_analytical_solution(
-            X1_test[:, 1], X1_test[:, 0]).cpu().detach().numpy()
+            X1_test[:, 1], X1_test[:, 0])  # .cpu().detach().numpy()
     else:
         analytical_solution = np.load(analytical_solution_filename)
 
@@ -424,6 +432,16 @@ def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.te
             lower_x_tensor_test_scaled).cpu().detach().numpy()
         predicted_upper = model(
             upper_x_tensor_test_scaled).cpu().detach().numpy()
+
+    if model2 is not None:
+        with torch.no_grad():
+            predicted_pde2 = model2(X1_test_scaled).cpu().detach().numpy()
+            predicted_expiry2 = model2(
+                expiry_x_tensor_test_scaled).cpu().detach().numpy()
+            predicted_lower2 = model2(
+                lower_x_tensor_test_scaled).cpu().detach().numpy()
+            predicted_upper2 = model2(
+                upper_x_tensor_test_scaled).cpu().detach().numpy()
 
     X1_test = X1_test.cpu().detach().numpy()
     expiry_x_tensor_test = expiry_x_tensor_test.cpu().detach().numpy()
@@ -441,55 +459,102 @@ def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.te
     all_y = np.vstack([analytical_solution, expiry_y_tensor_test,
                       lower_y_tensor_test, upper_y_tensor_test])
 
-    fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+    if model2 is not None:
+        all_preds_2 = np.vstack(
+            [predicted_pde2, predicted_expiry2, predicted_lower2, predicted_upper2])
+        fig, ax = plt.subplots(1, 2, figsize=(10, 4))
 
-    scatter1 = ax[0].scatter(
-        all_points[:, 0], all_points[:, 1], c=all_preds, norm=SymLogNorm(linthresh=10**(-8)))
-    cbar1 = plt.colorbar(scatter1, ax=ax[0])
-    ax[0].set_title("Predicted values")
+        scatter1 = ax[0].scatter(
+            all_points[:, 0], all_points[:, 1], c=np.abs(all_y - all_preds_2).ravel(), norm=LogNorm(),  cmap='plasma')
+        cbar1 = plt.colorbar(scatter1, ax=ax[0])
+        ax[0].set_title("Small model")
+        ax[0].set_xlabel("Time")
+        ax[0].set_ylabel("Asset price")
 
-    scatter2 = ax[1].scatter(all_points[:, 0], all_points[:, 1], c=np.abs(
-        all_y - all_preds), cmap='plasma', norm=LogNorm())
-    cbar2 = plt.colorbar(scatter2, ax=ax[1])
-    ax[1].set_title("Absolute error")
+        scatter2 = ax[1].scatter(all_points[:, 0], all_points[:, 1], c=np.fmax(np.abs(
+            all_y - all_preds), 1e-8).ravel(), cmap='plasma', norm=LogNorm())
+        cbar2 = plt.colorbar(scatter2, ax=ax[1])
+        ax[1].set_title("Large model")
+        ax[1].set_xlabel("Time")
+        fig.tight_layout()
 
-    plt.tight_layout()
-    plt.savefig(filename, format="jpg", dpi=120,
+    else:
+        scatter2 = plt.scatter(all_points[:, 0], all_points[:, 1], c=np.abs(
+            all_y - all_preds), cmap='plasma', norm=LogNorm())
+        cbar2 = plt.colorbar(scatter2)
+        plt.xlabel("Time")
+        plt.ylabel("Asset price")
+        plt.title("Absolute error")
+
+        plt.tight_layout()
+    plt.savefig(filename, format="jpg", dpi=180,
                 pil_kwargs={"quality": 100}, bbox_inches='tight')
+
+
+def plot_loss_and_sigma_backwards_problem(lambda_pdes: list, filename):
+    fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+    x = np.arange(0, 15_000, 1)
+
+    for scale in lambda_pdes:
+        X_loss = np.load(f"results_backwards/average_loss_scale_{scale}.npy")
+        X_loss = X_loss[:X_loss.shape[0] // 2, :]
+
+        X_sigma = np.load(f"results_backwards/average_sigma_scale_{scale}.npy")
+        X_sigma = X_sigma[: X_sigma.shape[0]//2, :]
+
+        ax[0].plot(x, X_loss[:, 1] + X_loss[:, 0],
+                   label=r"$\lambda_{PDE}$ =" + f"{scale}")
+        ax[1].plot(x, X_sigma.ravel())
+
+    ax[1].plot(x, 0.5*np.ones(15_000), label=r"True $\sigma$")
+    ax[1].legend()
+    ax[0].legend()
+    ax[0].set_yscale("log")
+    ax[0].set_ylabel("Average loss")
+    ax[0].set_xlabel("Epoch")
+
+    ax[1].set_xlabel("Epoch")
+    ax[1].set_ylabel(r"Average $\sigma$")
+    fig.tight_layout()
+    plt.savefig(filename)
 
 
 if __name__ == "__main__":
     """ visualize_one_dimensional(50, "models/greeks.pth",
-                              "plots/one_dim_european.pdf") """
-    # plt.clf()
-    # make_training_plot("plots/fourier_loss.pdf")
-    # plt.clf()
-    binomial_plot("plots/binomial.pdf")
-    plt.clf()
+                              "plots/one_dim_european.pdf")
+    plt.clf() """
+    """ make_training_plot("plots/fourier_loss.pdf")
+    plt.clf() """
+
+    """ binomial_plot("plots/binomial.pdf")
+    plt.clf() """
 
     """ plots_greeks(10_000, 0.5, "models/greeks.pth",
-                 "plots/one_dim_european_greeks.pdf") """
+                 "plots/one_dim_european_greeks.pdf")
+    plt.clf() """
 
     """ plot_different_loss("large_model", "plots/large_model_loss.pdf",
                         x_values=np.arange(1, 3_000_000 + 1, 1200))
-
+    plt.clf()
     plot_different_loss("small_model", "plots/small_model_loss.pdf",
-                        x_values=np.arange(1, 200_000 + 1, 90)[1:]) """
+                        x_values=np.arange(1, 300_000 + 1, 90)[1:])
+    plt.clf() """
 
     """ plot_different_loss("american_multiple", "plots/american_loss.pdf", values_to_skip=100,
-                        x_values=np.arange(1, 600_000 + 1, 600), use_average=True) """
+                        x_values=np.arange(1, 600_000 + 1, 600), use_average=True, american=True)
+    plt.clf() """
 
-    """ torch.manual_seed(2025)
-    np.random.seed(2025)
+    """ torch.manual_seed(2024)
+    np.random.seed(2024)
     dataloader = DataGeneratorEuropean1D(
-        time_range=[0, 1], S_range=[0, 400], K=40, r=0.04, sigma=0.5, DEVICE=DEVICE)
+        time_range=[0, 1], S_range=[0, 400], K=40, r=0.04, sigma=0.5, DEVICE=DEVICE, seed=2024)
 
     validation_data = create_validation_data(
         dataloader=dataloader, N_validation=5_000, config=one_euro.config)
 
     test_data = create_validation_data(
         dataloader=dataloader, N_validation=20_000, config=one_euro.config)
-    large_model = PINNforwards(2, 1, 128, 8, use_fourier_transform=True,
+    large_model = PINNforwards(2, 1, 256, 4, use_fourier_transform=True,
                                sigma_FF=5.0, encoded_size=128)
     large_model.load_state_dict(torch.load(
         "models/large_model.pth", weights_only=True))
@@ -500,15 +565,14 @@ if __name__ == "__main__":
         "models/small_model.pth", weights_only=True))
 
     plot_heat_map_of_predicted_versus_analytical(
-        large_model, test_data, dataloader, "plots/large_model.jpg")
-    plot_heat_map_of_predicted_versus_analytical(
-        small_model, test_data, dataloader, "plots/small_model.jpg") """
+        large_model, test_data, dataloader, "plots/european_scatter.jpg", model2=small_model)
+    plt.clf() """
 
-    """ torch.manual_seed(2025)
-    np.random.seed(2025)
+    torch.manual_seed(2024)
+    np.random.seed(2024)
     dataloader_american = DataGeneratorAmerican1D(
         time_range=one_american.config["t_range"], S_range=one_american.config["S_range"],
-        K=one_american.config["K"], r=one_american.config["r"], sigma=one_american.config["sigma"], DEVICE=DEVICE)
+        K=one_american.config["K"], r=one_american.config["r"], sigma=one_american.config["sigma"], DEVICE=DEVICE, seed=2024)
 
     validation_data = create_validation_data(
         dataloader=dataloader_american, N_validation=5_000, config=one_american.config)
@@ -520,8 +584,9 @@ if __name__ == "__main__":
         2, 1, 128, 4, use_fourier_transform=True, sigma_FF=5.0, encoded_size=128)
     american_model.load_state_dict(torch.load(
         "models/american_multiple.pth", weights_only=True))
-    print(compute_test_loss(american_model, test_data,
-          dataloader_american, "data/test_data_american_1D.npy"))
 
     plot_heat_map_of_predicted_versus_analytical(
-        american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy") """
+        american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy")
+
+    """ plot_loss_and_sigma_backwards_problem(
+        lambda_pdes=["0.0", "0.0001", "0.001", "1000"], filename="plots/loss_vs_sigma.pdf") """

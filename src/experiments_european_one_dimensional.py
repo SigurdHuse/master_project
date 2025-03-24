@@ -62,22 +62,22 @@ if __name__ == "__main__":
     test_data = create_validation_data(
         dataloader=dataloader, N_validation=20_000, config=config)
 
-    """ torch.manual_seed(2025)
+    torch.manual_seed(2025)
     np.random.seed(2025)
     dataloader = DataGeneratorEuropean1D(
         time_range=config["t_range"], S_range=config["S_range"], K=config["K"], r=config["r"], sigma=config["sigma"], DEVICE=DEVICE, seed=2025)
     try_different_learning_rates(config=config, dataloader=dataloader, PDE=black_scholes_1D,
                                  filename1="important_results/european_1D/RMSE_lr_first.txt", filename2="important_results/european_1D/epoch_lr_first.txt",
                                  learning_rates=[5e-3, 1e-3, 5e-4], batch_sizes=[256, 512, 1024, 2048, 4096],
-                                 validation_data=validation_data, test_data=test_data, epochs=600_000) """
+                                 validation_data=validation_data, test_data=test_data, epochs=600_000)
 
-    """ torch.manual_seed(2025)
+    torch.manual_seed(2025)
     np.random.seed(2025)
     dataloader = DataGeneratorEuropean1D(
         time_range=config["t_range"], S_range=config["S_range"], K=config["K"], r=config["r"], sigma=config["sigma"], DEVICE=DEVICE, seed=2025)
     try_sigma_fourier_and_embedding_size(config=config, dataloader=dataloader, PDE=black_scholes_1D,
                                          filename1="important_results/european_1D/RMSE_fourier.txt", filename2="important_results/european_1D/epoch_fourier.txt",
-                                         sigma_fourier=[1.0, 5.0, 10.0], embedding_size=[32, 64, 128, 256, 512], validation_data=validation_data, test_data=test_data, epochs=600_000) """
+                                         sigma_fourier=[1.0, 5.0, 10.0], embedding_size=[32, 64, 128, 256, 512], validation_data=validation_data, test_data=test_data, epochs=600_000)
 
     config["epochs_before_validation_loss_saved"] = 600
     config["epochs_before_loss_saved"] = 600
@@ -153,7 +153,7 @@ if __name__ == "__main__":
     config["epochs_before_validation_loss_saved"] = 1200
     config["epochs_before_loss_saved"] = 1200
     config["save_loss"] = True
-    model = PINNforwards(2, 1, 128, 8, use_fourier_transform=True,
+    model = PINNforwards(2, 1, 256, 4, use_fourier_transform=True,
                          sigma_FF=5.0, encoded_size=128)
     best_epoch = train(model, 3_000_000, config["learning_rate"], dataloader,
                        config, "large_model", black_scholes_1D, validation_data)
@@ -178,7 +178,7 @@ if __name__ == "__main__":
     config["save_loss"] = True
     model = PINNforwards(2, 1, 64, 2, use_fourier_transform=True,
                          sigma_FF=5.0, encoded_size=128)
-    best_epoch = train(model, 200_000, config["learning_rate"], dataloader,
+    best_epoch = train(model, 300_000, config["learning_rate"], dataloader,
                        config, "small_model", black_scholes_1D, validation_data)
     config["save_model"] = False
     config["save_loss"] = False

@@ -1,6 +1,7 @@
 from data_generator import DataGeneratorEuropean1D
 import numpy as np
 import torch
+import pandas as pd
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(DEVICE)
@@ -32,8 +33,42 @@ def generate_1D_european(nr_of_points: int, config: dict, filename: str):
     np.save("data/" + filename, X_pde)
 
 
+def extract_apple_data(nr_of_validation: int, nr_of_training: int, nr_of_test: int):
+    df = pd.read_csv("data/apple_data.csv", delimiter=",")
+    values = df.values[:, :3]
+    values = values.astype(np.float32)
+    N = values.shape[0]
+
+    assert nr_of_validation + nr_of_training + \
+        nr_of_test == N, f"You need to use all {N} points"
+
+    idx = np.random.permutation(N)
+    print(idx)
+    print(f"Max stock price: {np.max(values[:, 1]):.2f}")
+    print(f"Min stock price: {np.min(values[:, 1]):.2f}")
+
+    print(f"Max time: {np.max(values[:, 0]):.2f}")
+    print(f"Min time: {np.min(values[:, 0]):.2f}")
+
+    n1 = nr_of_validation
+    n2 = n1 + nr_of_training
+    n3 = n2 + nr_of_test
+
+    val_X = values[:n1]
+    train_X = values[n1:n2]
+    test_X = values[n2:n3]
+
+    np.save("data/apple_data_test.npy", test_X)
+    np.save("data/apple_data_val.npy", val_X)
+    np.save("data/apple_data_train.npy", train_X)
+    # print(val_X)
+    # print(train_X)
+    # print(test_X)
+    # print(df.values)
+
+
 if __name__ == "__main__":
-    config = {
+    """ config = {
         "K": 40,
         "time_range": [0, 1],
         "S_range": [0, 400],
@@ -45,4 +80,6 @@ if __name__ == "__main__":
     config["seed"] = 2
     generate_1D_european(5_00, config, "european_one_dimensional_val.npy")
     config["seed"] = 3
-    generate_1D_european(4_000, config, "european_one_dimensional_test.npy")
+    generate_1D_european(4_000, config, "european_one_dimensional_test.npy") """
+    extract_apple_data(nr_of_validation=1590,
+                       nr_of_test=7945, nr_of_training=22251)

@@ -135,6 +135,9 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
         self.max_values = torch.tensor(
             [self.time_range[1]] + [S[1] for S in self.S_range]).to(self.DEVICE)
 
+        """ self.sampler_multi = qmc.Halton(d=self.N + 1, seed=seed)
+        self.sampler_no_time = qmc.Halton(d=self.N, seed=seed)
+        self.sampler_1D = qmc.Halton(d=1, seed=seed) """
         self.sampler_multi = qmc.LatinHypercube(d=self.N + 1, seed=seed)
         self.sampler_no_time = qmc.LatinHypercube(d=self.N, seed=seed)
         self.sampler_1D = qmc.LatinHypercube(d=1, seed=seed)
@@ -163,6 +166,13 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
 
     def get_boundary_data(self, n, w1=1, w2=1):
         T = self.time_range[-1]
+        """ lower_X = self.sampler_multi.random(n=int(n*w1))
+        lower_X = qmc.scale(lower_X, self.scaler_min, self.scaler_max)
+
+        idx = np.random.randint(1, self.N+1, int(n*w1))
+        for i, cur in enumerate(idx):
+            lower_X[i, cur] = 0.0 """
+
         lower_sample = self.sampler_1D.random(n=int(n*w1))
         lower_X = qmc.scale(
             lower_sample, [self.time_range[0]], [self.time_range[1]])
@@ -206,7 +216,7 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
 
         sigma_eff_sq /= self.N**2
         sigma_eff = np.sqrt(sigma_eff_sq)
-        print(sigma_eff_sq)
+        # print(sigma_eff_sq)
         # print(G, self.K, self.r, sigma_eff_sq, t2m)
         d1 = (np.log(G / self.K) + (self.r + 0.5 * sigma_eff_sq)
               * t2m) / (sigma_eff * np.sqrt(t2m))
