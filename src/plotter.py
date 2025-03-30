@@ -15,17 +15,18 @@ from matplotlib.colors import LogNorm, SymLogNorm
 import experiments_european_one_dimensional as one_euro
 import experiments_american_one_dimensional as one_american
 from training_functions import compute_test_loss
+import matplotlib.ticker as ticker
 
 torch.set_default_device(DEVICE)
 
 
-mpl.rcParams["figure.titlesize"] = 18
-mpl.rcParams["axes.labelsize"] = 15
-mpl.rcParams["axes.titlesize"] = 14
+mpl.rcParams["figure.titlesize"] = 20
+mpl.rcParams["axes.labelsize"] = 17
+mpl.rcParams["axes.titlesize"] = 15
 mpl.rcParams["legend.fontsize"] = "medium"
-mpl.rcParams["xtick.labelsize"] = 12
-mpl.rcParams["ytick.labelsize"] = 12
-mpl.rcParams["figure.dpi"] = 500
+mpl.rcParams["xtick.labelsize"] = 14
+mpl.rcParams["ytick.labelsize"] = 14
+mpl.rcParams["figure.dpi"] = 1_000
 
 
 def get_analytical_solution(S, t, t_range, sigma, r, K):
@@ -492,7 +493,7 @@ def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.te
 
 
 def plot_loss_and_sigma_backwards_problem(lambda_pdes: list, filename):
-    fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
     x = np.arange(0, 15_000, 1)
 
     for scale in lambda_pdes:
@@ -500,21 +501,82 @@ def plot_loss_and_sigma_backwards_problem(lambda_pdes: list, filename):
         X_loss = X_loss[:X_loss.shape[0] // 2, :]
 
         X_sigma = np.load(f"results_backwards/average_sigma_scale_{scale}.npy")
+        X_sigma_std = X_sigma[X_sigma.shape[0]//2:, :]
         X_sigma = X_sigma[: X_sigma.shape[0]//2, :]
 
         ax[0].plot(x, X_loss[:, 1] + X_loss[:, 0],
                    label=r"$\lambda_{PDE}$ =" + f"{scale}")
         ax[1].plot(x, X_sigma.ravel())
+        # ax[1].plot(x, X_sigma_std.ravel(), label = r"$\lambda_{PDE}$ =" +f"{scale}")
 
     ax[1].plot(x, 0.5*np.ones(15_000), label=r"True $\sigma$")
     ax[1].legend()
+    ax[1].grid()
+
     ax[0].legend()
     ax[0].set_yscale("log")
     ax[0].set_ylabel("Average loss")
     ax[0].set_xlabel("Epoch")
 
+    ax[0].grid()
     ax[1].set_xlabel("Epoch")
     ax[1].set_ylabel(r"Average $\sigma$")
+
+    fig.tight_layout()
+
+    plt.savefig(filename)
+
+
+def plot_all_sigma_for_two(filename):
+    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
+
+    X1 = np.load("results_backwards/sigma_scale_0.0001.npy")
+    X2 = np.load("results_backwards/sigma_scale_1000.npy")
+
+    for i in range(X1.shape[0]):
+        ax[0].plot(X1[i])
+        ax[1].plot(X2[i])
+
+    ax[0].set_title(r"$\lambda_{PDE} = 10^{-4}$")
+    ax[0].grid()
+    ax[0].set_ylabel(r"$\sigma$")
+    ax[0].set_xlabel("Epoch")
+    ax[1].grid()
+    ax[1].set_title(r"$\lambda_{PDE} = 1000$")
+    ax[1].set_ylabel(r"$\sigma$")
+    ax[1].set_xlabel("Epoch")
+
+    fig.tight_layout()
+    plt.savefig(filename)
+
+
+def plot_log_log_dimensions(filename):
+    dims = np.array(list(range(2, 13 + 1)))
+    rmse = np.loadtxt("important_results/european_multi/RMSE_dim.txt")
+    timings = np.loadtxt("important_results/european_multi/timings_dim.txt")
+
+    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
+    ax[0].plot(dims, timings, label="Training time", color="midnightblue")
+    ax[0].plot(dims, (dims + 10)**4, label=r"$O(N^4)$", color="red")
+    ax[0].legend()
+    ax[0].set_xlabel("Dimension (N)")
+    ax[0].set_yscale("log")
+    ax[0].set_xscale("log")
+    ax[0].xaxis.set_major_formatter(ticker.ScalarFormatter())
+    ax[0].xaxis.set_minor_formatter(ticker.NullFormatter())
+    # ax[0].set_xlim(2, 13)
+    ax[0].grid()
+
+    ax[1].plot(dims, rmse, label="Test RMSE", color="midnightblue")
+    # ax[1].plot(dims, (dims + 1)**4 - (dims + 0.999999)**4, label=r"$O(N^4)$")
+    ax[1].set_xlabel("Dimension (N)")
+    ax[1].legend()
+    ax[1].set_yscale("log")
+    ax[1].set_ylim(1e-4, 1e-1)
+
+    # ax[1].set_xscale("log")
+    ax[1].grid()
+
     fig.tight_layout()
     plt.savefig(filename)
 
@@ -524,27 +586,27 @@ if __name__ == "__main__":
                               "plots/one_dim_european.pdf")
     plt.clf() """
     """ make_training_plot("plots/fourier_loss.pdf")
-    plt.clf() """
+    plt.clf()
 
-    """ binomial_plot("plots/binomial.pdf")
-    plt.clf() """
+    binomial_plot("plots/binomial.pdf")
+    plt.clf()
 
-    """ plots_greeks(10_000, 0.5, "models/greeks.pth",
+    plots_greeks(10_000, 0.5, "models/greeks.pth",
                  "plots/one_dim_european_greeks.pdf")
-    plt.clf() """
+    plt.clf()
 
-    """ plot_different_loss("large_model", "plots/large_model_loss.pdf",
+    plot_different_loss("large_model", "plots/large_model_loss.pdf",
                         x_values=np.arange(1, 3_000_000 + 1, 1200))
     plt.clf()
     plot_different_loss("small_model", "plots/small_model_loss.pdf",
                         x_values=np.arange(1, 300_000 + 1, 90)[1:])
-    plt.clf() """
+    plt.clf()
 
-    """ plot_different_loss("american_multiple", "plots/american_loss.pdf", values_to_skip=100,
+    plot_different_loss("american_multiple", "plots/american_loss.pdf", values_to_skip=100,
                         x_values=np.arange(1, 600_000 + 1, 600), use_average=True, american=True)
-    plt.clf() """
+    plt.clf()
 
-    """ torch.manual_seed(2024)
+    torch.manual_seed(2024)
     np.random.seed(2024)
     dataloader = DataGeneratorEuropean1D(
         time_range=[0, 1], S_range=[0, 400], K=40, r=0.04, sigma=0.5, DEVICE=DEVICE, seed=2024)
@@ -566,7 +628,7 @@ if __name__ == "__main__":
 
     plot_heat_map_of_predicted_versus_analytical(
         large_model, test_data, dataloader, "plots/european_scatter.jpg", model2=small_model)
-    plt.clf() """
+    plt.clf()
 
     torch.manual_seed(2024)
     np.random.seed(2024)
@@ -586,7 +648,14 @@ if __name__ == "__main__":
         "models/american_multiple.pth", weights_only=True))
 
     plot_heat_map_of_predicted_versus_analytical(
-        american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy")
+        american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy") """
 
     """ plot_loss_and_sigma_backwards_problem(
-        lambda_pdes=["0.0", "0.0001", "0.001", "1000"], filename="plots/loss_vs_sigma.pdf") """
+        lambda_pdes=["1e-05", "0.0001", "0.001", "0.0", "10", "1000"], filename="plots/loss_vs_sigma.pdf")
+    plt.clf() """
+
+    # plot_all_sigma_for_two(filename="plots/sigmas.pdf")
+    """ plot_log_log_dimensions(filename="plots/dimensions.pdf") """
+    plot_different_loss("multi_dim", "plots/multi_dim.pdf",
+                        x_values=np.arange(1, 800_000 + 1, 600), use_average=True)
+    plt.clf()

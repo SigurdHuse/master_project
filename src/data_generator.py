@@ -208,9 +208,9 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
 
         sigma_eff_sq = 0
 
-        for i in range(self.N):
+        for j in range(self.N):
             tmp = 0
-            for j in range(self.N):
+            for i in range(self.N):
                 tmp += self.sigma[i, j]
             sigma_eff_sq += tmp**2
 

@@ -36,6 +36,7 @@ def generate_1D_european(nr_of_points: int, config: dict, filename: str):
 def extract_apple_data(nr_of_validation: int, nr_of_training: int, nr_of_test: int):
     df = pd.read_csv("data/apple_data.csv", delimiter=",")
     values = df.values[:, :3]
+    values = values[~np.isnan(values).any(axis=1)]
     values = values.astype(np.float32)
     N = values.shape[0]
 
@@ -81,5 +82,7 @@ if __name__ == "__main__":
     generate_1D_european(5_00, config, "european_one_dimensional_val.npy")
     config["seed"] = 3
     generate_1D_european(4_000, config, "european_one_dimensional_test.npy") """
-    extract_apple_data(nr_of_validation=1590,
-                       nr_of_test=7945, nr_of_training=22251)
+
+    np.random.seed(1000)
+    extract_apple_data(nr_of_validation=1562,
+                       nr_of_test=7907, nr_of_training=20_052)

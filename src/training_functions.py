@@ -446,7 +446,7 @@ def try_multiple_dimensions(dimensions: list, config, PDE, filename1: str, filen
 
     for i, d in enumerate(dimensions):
         cur_S_range = np.array([[0, 20] for i in range(d)])
-        cur_sigma = np.full((d, d), 0.15)
+        cur_sigma = np.full((d, d), 0.075)
 
         cur_config["sigma"] = cur_sigma
         cur_config["sigma_torch"] = torch.tensor(
