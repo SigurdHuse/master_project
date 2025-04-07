@@ -10,9 +10,28 @@ import numpy as np
 import matplotlib.pyplot as plt
 from data_generator import DataGeneratorEuropean1D
 import os
+from typing import Callable, Tuple
+
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+torch.set_default_device(DEVICE)
 
 
-def black_scholes_1D_backwards(y1_hat, X1, sigma, r):
+def black_scholes_1D_backwards(y1_hat: torch.tensor,
+                               X1: torch.tensor,
+                               sigma: Tuple[torch.tensor, float],
+                               r: Tuple[torch.tensor, float]) -> torch.tensor:
+    """Computes the PDE residual for the Black-Scholes PDE.
+
+    Args:
+        y1_hat (torch.tensor):              Predicted option prices
+        X1 (torch.tensor):                  Input points to network
+        sigma (Tuple[torch.tensor, float]): Volatility in model, can both be a tunable hyperparameter or a constant.
+        r (Tuple[torch.tensor, float]):     Risk-free interest rate in model, can both be a tunable hyperparameter or a constant.
+
+    Returns:
+        torch.tensor: Numerically approximated PDE residual in input points
+    """
+
     grads = torch.autograd.grad(y1_hat, X1, grad_outputs=torch.ones(y1_hat.shape).to(
         DEVICE), retain_graph=True, create_graph=True, only_inputs=True)[0]
     dVdt, dVdS = grads[:, 0].view(-1, 1), grads[:, 1].view(-1, 1)
@@ -28,12 +47,28 @@ def black_scholes_1D_backwards(y1_hat, X1, sigma, r):
     return bs_pde
 
 
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-torch.set_default_device(DEVICE)
+def train(model: PINNforwards,
+          nr_of_epochs: int,
+          config: dict,
+          PDE: Callable[[torch.tensor, torch.tensor, Tuple[torch.tensor, float], Tuple[torch.tensor, float]], torch.tensor],
+          pde_dataloader: DataGeneratorEuropean1D,
+          final_learning_rate: float = 1e-5,
+          filename: str = "") -> Tuple[np.array, float]:
+    """Main training function using sigma as the hidden parameter in PDE.
 
+    Args:
+        model (PINNforwards):   Model currently being trained.
+        nr_of_epochs (int):     Number of epochs to train model for.
+        config (dict):          Dictionary with hyperparameters
+        PDE (Callable[[torch.tensor, torch.tensor, Tuple[torch.tensor, float], Tuple[torch.tensor, float]], torch.tensor]): Function which computes the PDE residual for the inner domain points.
+        pde_dataloader (DataGeneratorEuropean1D): Dataloader used to generate PDE training data.
+        final_learning_rate (float, optional): Final learning rate. Defaults to 1e-5.
+        filename (str, optional): Filename to store loss as. Defaults to "".
 
-def train(model: PINNforwards, nr_of_epochs: int, config: dict, PDE, pde_dataloader, final_learning_rate: float = 1e-5, filename: str = ""):
-    # print("PDE Scale", config["pde_scale"])
+    Returns:
+        Tuple[np.array, float]: Approximated sigmas and best validation epoch.
+    """
+
     n = np.log(final_learning_rate /
                config["learning_rate"]) / np.log(config["gamma"])
     scheduler_step = int(nr_of_epochs // n)
@@ -41,10 +76,10 @@ def train(model: PINNforwards, nr_of_epochs: int, config: dict, PDE, pde_dataloa
 
     loss_history = {i: [] for i in types_of_loss}
     loss_history_validation = {i: [] for i in types_of_loss}
+
     # Make sure we do not modulo w.r.t 0
     if scheduler_step <= 0:
         scheduler_step = nr_of_epochs
-    # print(scheduler_step)
 
     dataset = DataLoaderEuropean(
         config["train_filename"], config["training_noise"])
@@ -62,6 +97,8 @@ def train(model: PINNforwards, nr_of_epochs: int, config: dict, PDE, pde_dataloa
 
     sigma = torch.nn.Parameter(torch.tensor(
         [2.0], requires_grad=True)).to(DEVICE)
+
+    # Make sigma a tunable hyperparamater
     optimizer = torch.optim.Adam(
         list(model.parameters())+[sigma], lr=config["learning_rate"], weight_decay=config["weight_decay"])
 
@@ -93,11 +130,9 @@ def train(model: PINNforwards, nr_of_epochs: int, config: dict, PDE, pde_dataloa
             x_scaled = (x - min_values) / (max_values - min_values)
             y = y.unsqueeze(1)
 
-            # print(torch.max(x_scaled))
             y_hat = model(x_scaled)
             loss_target = loss_function(y_hat, y)
 
-            # loss = config["pde_scale"] * loss_pde + loss_target
             loss = loss_target
 
             if config["use_target_points_for_PDE"]:
@@ -153,6 +188,7 @@ def train(model: PINNforwards, nr_of_epochs: int, config: dict, PDE, pde_dataloa
 
                 x = x.requires_grad_(True)
                 x_scaled = (x - min_values) / (max_values - min_values)
+
                 y = y.unsqueeze(1)
 
                 y_hat = model(x_scaled)
@@ -181,7 +217,7 @@ def train(model: PINNforwards, nr_of_epochs: int, config: dict, PDE, pde_dataloa
             loss_history_validation["loss_pde"].append(
                 total_val_loss_target)
 
-            loss_val = total_loss_target + \
+            loss_val = total_val_loss_target + \
                 total_val_loss_pde * config["pde_scale"]
 
             # Make sure the validation prediction does not affect the training
@@ -214,8 +250,24 @@ def train(model: PINNforwards, nr_of_epochs: int, config: dict, PDE, pde_dataloa
     return np.array(sigmas), best_validation_epoch
 
 
-def try_multiple_activation_functions(config: dict, filename1: str, filename2: str,  activation_functions: list, layers: list, epochs=15_000):
+# TODO This function is not correct and does not do what is says
+def try_multiple_activation_functions(config: dict,
+                                      filename1: str,
+                                      filename2: str,
+                                      activation_functions: list,
+                                      layers: list,
+                                      epochs: int = 15_000) -> None:
+    """Try different activation functions and number of layers in model design.
 
+    Args:
+        config (dict):                  Dictionary with hyperparameters.
+        filename1 (str):                Filename to save RMSE as.
+        filename2 (str):                Filename to save sigmas as.
+        activation_functions (list):    List with activation functions to try.
+        layers (list):                  List with different number of layers to try.
+        epochs (int, optional):         Number of epochs to train model for. Defaults to 15_000.
+    """
+    assert False, "This function does not work"
     dataset_test = DataLoaderEuropean(config["test_filename"])
 
     dataloader_test = DataLoader(
@@ -251,7 +303,7 @@ def try_multiple_activation_functions(config: dict, filename1: str, filename2: s
                         (y - y_hat)**2).item()
 
             errors[i, j] /= len(dataset_test)
-
+            errors[i, j] = np.sqrt(errors[i, j])
             all_sigmas[i * len(layers) + j, :] = sigmas
             print(
                 f"Trial {j + i*len(layers) + 1} / {len(layers)*len(activation_functions)} Done")
@@ -259,7 +311,27 @@ def try_multiple_activation_functions(config: dict, filename1: str, filename2: s
     np.save(filename2, all_sigmas)
 
 
-def try_learning_rate_and_target_scale(config: dict, filename1: str, filename2: str, filename3,  learning_rates: list, target_scales: list, pde_dataloader, epochs=15_000):
+def try_learning_rate_and_target_scale(config: dict,
+                                       filename1: str,
+                                       filename2: str,
+                                       filename3: str,
+                                       learning_rates: list,
+                                       target_scales: list,
+                                       pde_dataloader: DataGeneratorEuropean1D,
+                                       epochs: int = 15_000) -> None:
+    """Try different learning rates and scaling of PDE loss
+
+    Args:
+        config (dict):          Dictionary with hyperparameters.
+        filename1 (str):        Filename to save RMSE as.
+        filename2 (str):        Filename to save sigmas as.
+        filename3 (str):        Filename to save epochs as.
+        learning_rates (list):  List with learning rates to try.
+        target_scales (list):   List with scaling of PDE loss to try.
+        pde_dataloader (DataGeneratorEuropean1D): Dataloader used to generate PDE training data.
+        epochs (int, optional): Number of epochs to train model for. Defaults to 15_000.
+    """
+
     tmp_config = copy.deepcopy(config)
     dataset_test = DataLoaderEuropean(config["test_filename"])
 
@@ -303,21 +375,42 @@ def try_learning_rate_and_target_scale(config: dict, filename1: str, filename2: 
                     errors[i, j] += torch.sum(
                         (y - y_hat)**2).item()
 
-            print("Sigma", sigmas[epoch - 1])
             errors[i, j] /= len(dataset_test)
             errors[i, j] = np.sqrt(errors[i, j])
-            print(errors[i, j])
+
             best_epochs[i, j] = epoch
             all_sigmas[i * len(target_scales) + j, :] = sigmas
 
             print(f"Trial {j + i*len(target_scales) +
                   1} / {len(target_scales)*len(learning_rates)} Done")
+            print(f"RMSE achieved : {errors[i, j]}")
+
     np.savetxt(filename1, errors)
     np.save(filename2, all_sigmas)
     np.savetxt(filename3, best_epochs)
 
 
-def try_batch_sizes(config: dict, filename1: str, filename2: str, filename3,  batch_PDE: list, batch_target: list, dataloader, epochs=15_000):
+def try_batch_sizes(config: dict,
+                    filename1: str,
+                    filename2: str,
+                    filename3: str,
+                    batch_PDE: list,
+                    batch_target: list,
+                    dataloader: DataGeneratorEuropean1D,
+                    epochs: int = 15_000) -> None:
+    """Try different batch sizes for target and PDE.
+
+    Args:
+        config (dict):                          Dictionary with hyperparameters.
+        filename1 (str):                        Filename to save RMSE as.
+        filename2 (str):                        Filename to save sigmas as.
+        filename3 (str):                        Filename to save epochs as.
+        batch_PDE (list):                       List with PDE batch sizes to try.
+        batch_target (list):                    List with target batch sizes to try.
+        dataloader (DataGeneratorEuropean1D):   Dataloader used to generate PDE training data.
+        epochs (int, optional):                 Number of epochs to train model for. Defaults to 15_000.
+    """
+
     tmp_config = copy.deepcopy(config)
     dataset_test = DataLoaderEuropean(config["test_filename"])
 
@@ -377,8 +470,31 @@ def try_batch_sizes(config: dict, filename1: str, filename2: str, filename3,  ba
     np.savetxt(filename3, best_epochs)
 
 
-def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filename: str,
-                         nr_of_epochs: int, pde_dataloader, config: dict, custom_arc: list[int] = None, save_all_sigma=False):
+def train_multiple_times(seeds: list[int],
+                         layers: int,
+                         nodes: int,
+                         PDE: Callable[[torch.tensor, torch.tensor, Tuple[torch.tensor, float], Tuple[torch.tensor, float]], torch.tensor],
+                         filename: str,
+                         nr_of_epochs: int,
+                         pde_dataloader: DataGeneratorEuropean1D,
+                         config: dict,
+                         custom_arc: list[int] = None,
+                         save_all_sigma: bool = False) -> None:
+    """Trains a model multiple times for different RNG seeds.
+
+    Args:
+        seeds (list[int]):                  List with RNG seeds to try. 
+        layers (int):                       Number of layers in model.
+        nodes (int):                        Number of nodes in each layer in model.
+        PDE (Callable[[torch.tensor, torch.tensor, Tuple[torch.tensor, float], Tuple[torch.tensor, float]], torch.tensor]): Function which computes the PDE residual for the inner domain points.
+        filename (str):                     Filename to save results as.
+        nr_of_epochs (int):                 Number of epochs to train model for.
+        pde_dataloader (DataGeneratorEuropean1D): Dataloader used to generate PDE training data.
+        config (dict):                      Dictionary with hyperparameters.
+        custom_arc (list[int], optional):   List containing number of nodes in each layer. Defaults to None, if not None it owerwrites model arcitechture.
+        save_all_sigma (bool, optional):    Bool indicating if all sigmas should be saved and not only average. Defaults to False.
+    """
+
     cur_config = config.copy()
     cur_config["save_loss"] = True
     cur_config["save_model"] = False
@@ -470,7 +586,25 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
         np.save("results_backwards/sigma_" + filename, sigmas_results)
 
 
-def try_adding_noise(config: dict, filename1: str, filename2: str, filename3,  traing_noise, dataloader, epochs=15_000):
+def try_adding_noise(config: dict,
+                     filename1: str,
+                     filename2: str,
+                     filename3: str,
+                     traing_noise: list[float],
+                     dataloader: DataGeneratorEuropean1D,
+                     epochs: int = 15_000) -> None:
+    """Tries adding normally distributed noise with mean 0 to training data.
+
+    Args:
+        config (dict):                          Dictionary with hyperparameters.
+        filename1 (str):                        Filename to save RMSE as.
+        filename2 (str):                        Filename to save sigmas as.
+        filename3 (str):                        Filename to save epochs as.
+        traing_noise (list[float]):             List with variance of noise to add.
+        dataloader (DataGeneratorEuropean1D):   Dataloader used to generate PDE training data.
+        epochs (int, optional):                 Number of epochs to train model for. Defaults to 15_000.
+    """
+
     tmp_config = copy.deepcopy(config)
     dataset_test = DataLoaderEuropean(config["test_filename"])
 
@@ -557,145 +691,156 @@ if __name__ == "__main__":
     np.random.seed(1000)
     pde_dataloader = DataGeneratorEuropean1D(
         config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-    try_batch_sizes(config, "important_results_backwards/RMSE_batch_fine.txt",
-                    "important_results_backwards/sigmas_batch_fine.npy", "important_results_backwards/epochs_batch_fine.txt",
-                    batch_PDE=[0, 128, 256, 512, 1024], batch_target=[32, 64, 96, 128],
-                    dataloader=pde_dataloader, epochs=15_000) """
+    try_batch_sizes(config=config,
+                    filename1="important_results_backwards/RMSE_batch_fine.txt",
+                    filename2="important_results_backwards/sigmas_batch_fine.npy",
+                    filename3="important_results_backwards/epochs_batch_fine.txt",
+                    batch_PDE=[0, 128, 256, 512, 1024],
+                    batch_target=[32, 64, 96, 128],
+                    dataloader=pde_dataloader,
+                    epochs=15_000) """
 
     """ torch.manual_seed(1000)
     np.random.seed(1000)
     pde_dataloader = DataGeneratorEuropean1D(
         config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
     config["use_target_points_for_PDE"] = True
-    try_batch_sizes(config, "important_results_backwards/RMSE_same.txt",
-                    "important_results_backwards/sigmas_same.npy", "important_results_backwards/epochs_same.txt",
-                    batch_PDE=[0], batch_target=[16, 32, 64, 96, 128],
-                    dataloader=pde_dataloader, epochs=15_000)
+    try_batch_sizes(config=config,
+                    filename1="important_results_backwards/RMSE_same.txt",
+                    filename2="important_results_backwards/sigmas_same.npy",
+                    filename3="important_results_backwards/epochs_same.txt",
+                    batch_PDE=[0],
+                    batch_target=[16, 32, 64, 96, 128],
+                    dataloader=pde_dataloader,
+                    epochs=15_000)
     config["use_target_points_for_PDE"] = False """
 
-    # config["gamma"] = 1
     """ torch.manual_seed(1000)
     np.random.seed(1000)
     pde_dataloader = DataGeneratorEuropean1D(
         config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-    try_adding_noise(config, "important_results_backwards/RMSE_noise.txt",
-                     "important_results_backwards/sigmas_noise.npy", "important_results_backwards/epochs_noise.txt",
-                     [1e-3, 1e-2, 1e-1, 0.0, 1.0, 5.0, 10.0, 20.0], pde_dataloader, 15_000) """
+    try_adding_noise(config=config,
+                     filename1="important_results_backwards/RMSE_noise.txt",
+                     filename2="important_results_backwards/sigmas_noise.npy",
+                     filename3="important_results_backwards/epochs_noise.txt",
+                     traing_noise=[1e-3, 1e-2, 1e-1,
+                                   0.0, 1.0, 5.0, 10.0, 20.0],
+                     dataloader=pde_dataloader,
+                     epochs=15_000) """
 
-    """ for pde_scale in [1e-6]:
+    """ for pde_scale in [1e-6, 1e-5, 1e-3, 1e-2, 1e-1, 0.0, 10, 100, 5_000, 10_000]:
+        torch.manual_seed(1000)
+        np.random.seed(1000)
         config["pde_scale"] = pde_scale
         pde_dataloader = DataGeneratorEuropean1D(
             config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config) """
-
-    """ for pde_scale in [1e-5]:
-        config["pde_scale"] = pde_scale
-        pde_dataloader = DataGeneratorEuropean1D(
-            config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config) """
+        train_multiple_times(seeds=list(range(1, 10 + 1)),
+                             layers=4,
+                             nodes=128,
+                             PDE=black_scholes_1D_backwards,
+                             filename=f"scale_{pde_scale}",
+                             nr_of_epochs=15_000,
+                             pde_dataloader=pde_dataloader,
+                             config=config) """
 
     """ for pde_scale in [1e-4]:
+        torch.manual_seed(1000)
+        np.random.seed(1000)
         config["pde_scale"] = pde_scale
         pde_dataloader = DataGeneratorEuropean1D(
             config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config, save_all_sigma=True) """
-
-    """ for pde_scale in [1e-3]:
-        config["pde_scale"] = pde_scale
-        pde_dataloader = DataGeneratorEuropean1D(
-            config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config) """
-
-    """ for pde_scale in [1e-2]:
-        config["pde_scale"] = pde_scale
-        pde_dataloader = DataGeneratorEuropean1D(
-            config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config) """
-
-    """ for pde_scale in [1e-1]:
-        config["pde_scale"] = pde_scale
-        pde_dataloader = DataGeneratorEuropean1D(
-            config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config) """
-
-    """ for pde_scale in [0.0]:
-        config["pde_scale"] = pde_scale
-        pde_dataloader = DataGeneratorEuropean1D(
-            config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config) """
-
-    """ for pde_scale in [10]:
-        config["pde_scale"] = pde_scale
-        pde_dataloader = DataGeneratorEuropean1D(
-            config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config) """
-
-    """ for pde_scale in [100]:
-        config["pde_scale"] = pde_scale
-        pde_dataloader = DataGeneratorEuropean1D(
-            config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config) """
+        train_multiple_times(seeds=list(range(1, 10 + 1)),
+                             layers=4,
+                             nodes=128,
+                             PDE=black_scholes_1D_backwards,
+                             filename=f"scale_{pde_scale}",
+                             nr_of_epochs=15_000,
+                             pde_dataloader=pde_dataloader,
+                             config=config,
+                             save_all_sigma=True) """
 
     """ for pde_scale in [1000]:
+        torch.manual_seed(1000)
+        np.random.seed(1000)
         config["pde_scale"] = pde_scale
         pde_dataloader = DataGeneratorEuropean1D(
             config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config, save_all_sigma=True) """
-
-    """ for pde_scale in [5_000]:
-        config["pde_scale"] = pde_scale
-        pde_dataloader = DataGeneratorEuropean1D(
-            config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config) """
-
-    """ for pde_scale in [10_000]:
-        config["pde_scale"] = pde_scale
-        pde_dataloader = DataGeneratorEuropean1D(
-            config["t_range"], config["S_range"], K=None, r=config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-        train_multiple_times(seeds=list(range(1, 10 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                             filename=f"scale_{pde_scale}", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=config) """
+        train_multiple_times(seeds=list(range(1, 10 + 1)),
+                             layers=4,
+                             nodes=128,
+                             PDE=black_scholes_1D_backwards,
+                             filename=f"scale_{pde_scale}",
+                             nr_of_epochs=15_000,
+                             pde_dataloader=pde_dataloader,
+                             config=config,
+                             save_all_sigma=True) """
 
     apple_config = copy.deepcopy(config)
     apple_config["train_filename"] = "data/apple_data_train.npy"
     apple_config["val_filename"] = "data/apple_data_val.npy"
     apple_config["test_filename"] = "data/apple_data_test.npy"
-    apple_config["S_range"] = [90.34, 258.46]
-    apple_config["r"] = 2.20
+    apple_config["S_range"] = [90.34, 293.20]
+    apple_config["r"] = 0.023
     apple_config["t_range"] = [0.0, 2.42]
-    apple_config["save_model"] = True
+    apple_config["save_model"] = False
     apple_config["use_fourier_transform"] = True
+    apple_config["batch_size"] = 64
+    apple_config["PDE_batch"] = 1024
+    apple_config["PDE_epochs"] = 2_000
+    apple_config["pde_scale"] = 1e-4
 
     """ apple_config["pde_scale"] = 1e-4
     torch.manual_seed(1000)
     np.random.seed(1000)
     pde_dataloader = DataGeneratorEuropean1D(
-        apple_config["t_range"], apple_config["S_range"], K=None, r=apple_config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-    train_multiple_times(seeds=list(range(1, 1 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                         filename=f"apple_data_4_no_fourier", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=apple_config) """
-
-    """ apple_config["pde_scale"] = 0.0
-    torch.manual_seed(1000)
-    np.random.seed(1000)
-    pde_dataloader = DataGeneratorEuropean1D(
-        apple_config["t_range"], apple_config["S_range"], K=None, r=apple_config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-    train_multiple_times(seeds=list(range(1, 1 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                         filename=f"apple_data_0_no_fourier", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=apple_config) """
+        apple_config["t_range"], apple_config["S_range"], K=150, r=apple_config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
+    train_multiple_times(seeds=list(range(1, 1 + 1)),
+                         layers=4,
+                         nodes=128,
+                         PDE=black_scholes_1D_backwards,
+                         filename=f"apple_data_4_fourier",
+                         nr_of_epochs=30_000,
+                         pde_dataloader=pde_dataloader,
+                         config=apple_config) """
 
     """ apple_config["pde_scale"] = 1e-3
     torch.manual_seed(1000)
     np.random.seed(1000)
     pde_dataloader = DataGeneratorEuropean1D(
-        apple_config["t_range"], apple_config["S_range"], K=None, r=apple_config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
-    train_multiple_times(seeds=list(range(1, 1 + 1)), layers=4, nodes=128, PDE=black_scholes_1D_backwards,
-                         filename=f"apple_data_lambda_3_no_fourier", nr_of_epochs=15_000, pde_dataloader=pde_dataloader, config=apple_config) """
+        apple_config["t_range"], apple_config["S_range"], K=150, r=apple_config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
+    train_multiple_times(seeds=list(range(1, 1 + 1)),
+                         layers=4,
+                         nodes=128,
+                         PDE=black_scholes_1D_backwards,
+                         filename=f"apple_data_3_fourier",
+                         nr_of_epochs=30_000,
+                         pde_dataloader=pde_dataloader,
+                         config=apple_config) """
+
+    """ apple_config["pde_scale"] = 1e-2
+    torch.manual_seed(1000)
+    np.random.seed(1000)
+    pde_dataloader = DataGeneratorEuropean1D(
+        apple_config["t_range"], apple_config["S_range"], K=150, r=apple_config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
+    train_multiple_times(seeds=list(range(1, 1 + 1)),
+                         layers=4,
+                         nodes=128,
+                         PDE=black_scholes_1D_backwards,
+                         filename=f"apple_data_2_fourier",
+                         nr_of_epochs=30_000,
+                         pde_dataloader=pde_dataloader,
+                         config=apple_config) """
+
+    """ apple_config["pde_scale"] = 0.0
+    torch.manual_seed(1000)
+    np.random.seed(1000)
+    pde_dataloader = DataGeneratorEuropean1D(
+        apple_config["t_range"], apple_config["S_range"], K=150, r=apple_config["r"], sigma=None, DEVICE=DEVICE, seed=1000)
+    train_multiple_times(seeds=list(range(1, 1 + 1)),
+                         layers=4,
+                         nodes=128,
+                         PDE=black_scholes_1D_backwards,
+                         filename=f"apple_data_0_fourier",
+                         nr_of_epochs=30_000,
+                         pde_dataloader=pde_dataloader,
+                         config=apple_config) """

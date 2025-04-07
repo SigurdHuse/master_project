@@ -16,6 +16,7 @@ import experiments_european_one_dimensional as one_euro
 import experiments_american_one_dimensional as one_american
 from training_functions import compute_test_loss
 import matplotlib.ticker as ticker
+from typing import Callable, Union
 
 torch.set_default_device(DEVICE)
 
@@ -29,7 +30,21 @@ mpl.rcParams["ytick.labelsize"] = 14
 mpl.rcParams["figure.dpi"] = 1_000
 
 
-def get_analytical_solution(S, t, t_range, sigma, r, K):
+def get_analytical_solution(S: torch.tensor, t: torch.tensor, t_range: list[float], sigma: float, r: float, K: float) -> torch.tensor:
+    """Computes the analytical solution of a European call option
+
+    Args:
+        S (torch.tensor):       Asset prices
+        t (torch.tensor):       Times
+        t_range (list[float]):  Time range
+        sigma (float):          Volatility
+        r (float):              Risk-free rate
+        K (float):              Strike price
+
+    Returns:
+        torch.tensor: Computed analytical price
+    """
+
     T = t_range[-1]
     t2m = T-t  # Time to maturity
     d1 = (torch.log(S / K) + (r + 0.5 * sigma**2)
@@ -48,7 +63,9 @@ def get_analytical_solution(S, t, t_range, sigma, r, K):
     return F
 
 
-def make_training_plot(filename: str):
+def make_training_plot(filename: str) -> None:
+    """Makes training plot comparing using Fourier to not using Fourier for a 1D European call"""
+
     X_loss_fourier = np.load("results/average_loss_with_fourier.npy")
     X_loss = np.load("results/average_loss_no_fourier.npy")
 
@@ -95,92 +112,28 @@ def make_training_plot(filename: str):
     plt.savefig(filename)
 
 
-def visualize_one_dimensional(n: int, path_to_weights: str, name_of_plot: str):
-    n = 50
-    S_range = [0, 200]
-    t_range = [0, 1]
-    s = np.linspace(*S_range, n)
-    t = np.linspace(*t_range, n)
-    S, T = np.meshgrid(s, t)
+def standard_normal_pdf(x: torch.tensor) -> torch.tensor:
+    """Computes normal distribution pdf for mean = 0 and variance=1
 
-    X = torch.tensor(np.column_stack(
-        (T.flatten(), S.flatten())), dtype=torch.float)
-    min_values = torch.tensor(
-        [t_range[0], S_range[0]]).to(DEVICE)
-    max_values = torch.tensor(
-        [t_range[1], S_range[1]]).to(DEVICE)
+    Args:
+        x (torch.tensor): Points to compute pdf for.
 
-    X_scaled = (X - min_values) / (max_values - min_values)
-
-    model = PINNforwards(2, 1, 256, 4)
-    model.load_state_dict(torch.load(path_to_weights, weights_only=True))
-    model = model.to(DEVICE)
-
-    Z_model = model(X_scaled).to("cpu").detach().numpy().reshape((n, n))
-    Z_analytical = get_analytical_solution(X[:, 1], X[:, 0], t_range, 0.5, 0.04, 40).to(
-        "cpu").detach().numpy().reshape((n, n))
-
-    fig = make_subplots(
-        rows=1, cols=3,
-        specs=[[{'type': 'surface'}, {'type': 'surface'},
-                {'type': 'surface'}]],  # Specify 3D plots
-        subplot_titles=("Predicted", "Analytical",
-                        "Predicted subtracted Analytical"),
-        # horizontal_spacing=0.5
-    )
-
-    # Add the first 3D surface plot
-    fig.add_trace(
-        go.Surface(z=Z_model, x=S, y=T, colorscale='Cividis',
-                   showscale=True, colorbar=dict(title="Option price", x=0.65)),
-        row=1, col=1
-    )
-
-    # Add the second 3D surface plot
-    fig.add_trace(
-        go.Surface(z=Z_analytical, x=S, y=T,
-                   showscale=False, colorscale='Cividis'),
-        row=1, col=2
-    )
-
-    fig.add_trace(
-        go.Surface(z=Z_model - Z_analytical, x=S, y=T, colorscale='Viridis',
-                   showscale=True, colorbar=dict(title="Difference", x=1.0)),
-        row=1, col=3
-    )
-
-    fig.update_layout(
-        scene=dict(
-            xaxis_title="Stock price",
-            yaxis_title="Time",
-            zaxis_title="Option price",
-            camera=dict(eye=dict(x=-1, y=2, z=2))  # Adjust view for both plots
-        ),
-        scene2=dict(  # Layout for the second plot
-            xaxis_title="Stock price",
-            yaxis_title="Time",
-            zaxis_title="Option price",
-            camera=dict(eye=dict(x=-1, y=2, z=2))  # Adjust view for both plots
-        ),
-        scene3=dict(  # Layout for the second plot
-            xaxis_title="Stock price",
-            yaxis_title="Time",
-            zaxis_title="Option price",
-            camera=dict(eye=dict(x=-1, y=2, z=2))  # Adjust view for both plots
-        ),
-        margin=dict(l=0, r=0, t=30, b=0)
-    )
-    fig.update_annotations(font_size=20)
-    # Show the plot
-    fig.write_image(name_of_plot,
-                    width=2200, height=800, scale=1)
-
-
-def standard_normal_pdf(x):
+    Returns:
+        torch.tensor: Computed pdf
+    """
     return (1 / torch.sqrt(torch.tensor(2 * torch.pi))) * torch.exp(-x.pow(2) / 2)
 
 
-def plots_greeks(n: int, time: float, path_to_weights: str, name_of_plot: str):
+def plots_greeks(n: int, time: float, path_to_weights: str, name_of_plot: str) -> None:
+    """Plots predicted Greeks versus analytical
+
+    Args:
+        n (int):                Number of points to plot for
+        time (float):           Time to plot Greeks at
+        path_to_weights (str):  Path to weights used in model to predict Greeks.
+        name_of_plot (str):     Filename to save plot as
+    """
+
     S_range = [0, 400]
     t_range = [0, 1]
     S = np.linspace(*S_range, n)
@@ -293,7 +246,12 @@ def plots_greeks(n: int, time: float, path_to_weights: str, name_of_plot: str):
     plt.savefig(name_of_plot)
 
 
-def binomial_plot(filename):
+def binomial_plot(filename: str) -> None:
+    """Plots RMSE using Binomial and run time
+
+    Args:
+        filename (str): Filename to save plot as
+    """
     rmse = np.loadtxt("important_results/american_1D/RMSE_binomial.txt")
     timings = np.loadtxt("important_results/american_1D/timings_binomial.txt")
 
@@ -326,34 +284,19 @@ def binomial_plot(filename):
     plt.savefig(filename)
 
 
-def make_3D_american_plot(filename, X):
-    fig = plt.figure(figsize=(8, 6))
-    ax = fig.add_subplot(111, projection='3d')
+def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, values_to_skip: int = 100, skip_every: int = 5, use_average: bool = False, american: bool = False) -> None:
+    """Plots training, validation and different loss over epochs
 
-    y = np.load("data/test_data_american_1D.npy")
-    # Create a 3D line plot
-    ax.plot_trisurf(X[::1, 0], X[::1, 1], y[::1].ravel(),
-                    cmap='viridis', edgecolor='none')
+    Args:
+        name_of_model (str):            Name of data to plot
+        filename (str):                 Filename to save plot as
+        x_values (np.array):            Epochs values to plot on x-axis.
+        values_to_skip (int, optional): Values to skip plotting at the start. Defaults to 100.
+        skip_every (int, optional):     We plot only the points which occur skip_every. Defaults to 5.
+        use_average (bool, optional):   Indicates if we are plotting average loss. Defaults to False.
+        american (bool, optional):      Indicates of the loss if for a American option. Defaults to False.
+    """
 
-    # Optionally, you can also create a scatter plot if you want discrete points:
-    # ax.scatter(x, y, z, color='r', marker='o', label='3D points')
-
-    # Label the axes
-    ax.set_xlabel('Time')
-    ax.set_ylabel('Asset price')
-    ax.set_zlabel('Price function')
-
-    # Add a title and legend
-    # ax.set_title('3D Plot Example')
-    ax.view_init(elev=30, azim=30)
-    ax.legend()
-
-    fig.tight_layout()
-    # Display the plot
-    plt.savefig(filename)
-
-
-def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, values_to_skip=100, skip_every=5, use_average=False, american=False):
     if use_average:
         X_loss = np.load(f"results/average_loss_{name_of_model}.npy")
         X_loss = X_loss[: X_loss.shape[0] // 2]
@@ -400,7 +343,23 @@ def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, v
     plt.savefig(filename)
 
 
-def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.tensor], dataloader, filename, analytical_solution_filename: str = None, model2: PINNforwards = None):
+def plot_heat_map_of_predicted_versus_analytical(model: PINNforwards,
+                                                 test_data: dict[torch.tensor],
+                                                 dataloader: Union[DataGeneratorEuropean1D, DataGeneratorAmerican1D],
+                                                 filename: str,
+                                                 analytical_solution_filename: str = None,
+                                                 model2: PINNforwards = None) -> None:
+    """Plots heatmap of hetmap versus anlytical for a given model.
+
+    Args:
+        model (PINNforwards): Model we plot heatmap for
+        test_data (dict[torch.tensor]): Dictionary containing test data, which we use for plotting
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorAmerican1D]): Dataloader used to compute analytical solution
+        filename (str): Filename to save plot as
+        analytical_solution_filename (str, optional):  If analyzing American option, providing this will load the data. Defaults to None.
+        model2 (PINNforwards, optional): Model to compare model against if specified. Defaults to None.
+    """
+
     X1_test = test_data["X1_validation"]
     X1_test_scaled = test_data["X1_validation_scaled"]
 
@@ -492,7 +451,14 @@ def plot_heat_map_of_predicted_versus_analytical(model, test_data: dict[torch.te
                 pil_kwargs={"quality": 100}, bbox_inches='tight')
 
 
-def plot_loss_and_sigma_backwards_problem(lambda_pdes: list, filename):
+def plot_loss_and_sigma_backwards_problem(lambda_pdes: list, filename: str) -> None:
+    """Plot loss and sigma for inverse problem
+
+    Args:
+        lambda_pdes (list): List with different scalings used for PDE loss.
+        filename (str):     Filename to save plot as.
+    """
+
     fig, ax = plt.subplots(1, 2, figsize=(10, 4))
     x = np.arange(0, 15_000, 1)
 
@@ -527,7 +493,13 @@ def plot_loss_and_sigma_backwards_problem(lambda_pdes: list, filename):
     plt.savefig(filename)
 
 
-def plot_all_sigma_for_two(filename):
+def plot_all_sigma_for_two(filename: str) -> None:
+    """Plot all sigma for two different lambda_PDE for inverse problem.
+
+    Args:
+        filename (str): Filename to save plot as.
+    """
+
     fig, ax = plt.subplots(1, 2, figsize=(10, 4))
 
     X1 = np.load("results_backwards/sigma_scale_0.0001.npy")
@@ -550,8 +522,13 @@ def plot_all_sigma_for_two(filename):
     plt.savefig(filename)
 
 
-def plot_log_log_dimensions(filename):
-    dims = np.array(list(range(2, 13 + 1)))
+def plot_log_log_dimensions(filename: str) -> None:
+    """Plot log-log plot of run-time and test RMSE as a function of dimension for a geometric mean option.
+
+    Args:
+        filename (str): Filename to save plot as.
+    """
+    dims = np.array(list(range(2, 14 + 1)))
     rmse = np.loadtxt("important_results/european_multi/RMSE_dim.txt")
     timings = np.loadtxt("important_results/european_multi/timings_dim.txt")
 
@@ -582,10 +559,7 @@ def plot_log_log_dimensions(filename):
 
 
 if __name__ == "__main__":
-    """ visualize_one_dimensional(50, "models/greeks.pth",
-                              "plots/one_dim_european.pdf")
-    plt.clf() """
-    """ make_training_plot("plots/fourier_loss.pdf")
+    make_training_plot("plots/fourier_loss.pdf")
     plt.clf()
 
     binomial_plot("plots/binomial.pdf")
@@ -648,14 +622,14 @@ if __name__ == "__main__":
         "models/american_multiple.pth", weights_only=True))
 
     plot_heat_map_of_predicted_versus_analytical(
-        american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy") """
+        american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy")
 
-    """ plot_loss_and_sigma_backwards_problem(
+    plot_loss_and_sigma_backwards_problem(
         lambda_pdes=["1e-05", "0.0001", "0.001", "0.0", "10", "1000"], filename="plots/loss_vs_sigma.pdf")
-    plt.clf() """
+    plt.clf()
 
-    # plot_all_sigma_for_two(filename="plots/sigmas.pdf")
-    """ plot_log_log_dimensions(filename="plots/dimensions.pdf") """
+    plot_all_sigma_for_two(filename="plots/sigmas.pdf")
+    plot_log_log_dimensions(filename="plots/dimensions.pdf")
     plot_different_loss("multi_dim", "plots/multi_dim.pdf",
                         x_values=np.arange(1, 800_000 + 1, 600), use_average=True)
     plt.clf()

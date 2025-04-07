@@ -6,21 +6,28 @@ import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
 import copy
-
-import os
-import matplotlib.pyplot as plt
+from typing import Callable, Union
 
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(DEVICE)
 
 
-def black_scholes_multi_dimensional(y_hat, X1, config):
-    # sigma = config["sigma"]
+def black_scholes_multi_dimensional(y_hat: torch.tensor, X1: torch.tensor, config: dict) -> torch.tensor:
+    """Computes the PDE residual for the multi-dimensional Black-Scholes PDE
+
+    Args:
+        y_hat (torch.tensor): Predicted option prices
+        X1 (torch.tensor):    Input points to network
+        config (dict):        Dictionary with hyperparameters
+
+    Returns:
+        torch.tensor:         Numerically approximated PDE residual in input points
+    """
+
     sigma = config["sigma_torch"]
     r = config["r"]
 
-    # t = X1[:, :1]   # shape: [N, 1]
     S = X1[:, 1:]   # shape: [N, n]
     N, n = S.shape
 
@@ -33,14 +40,14 @@ def black_scholes_multi_dimensional(y_hat, X1, config):
         y_hat, X1, grad_outputs=ones, create_graph=True, retain_graph=True
     )[0]
 
-    # Extract time derivative: ∂V/∂t (first column).
+    # Extract time derivative
     V_t = grad_all[:, :1]  # shape: [N, 1]
 
-    # Extract first derivatives with respect to asset prices: ∂V/∂S_i (columns 1 to end).
+    # Extract first derivatives with respect to asset prices
     V_S = grad_all[:, 1:]  # shape: [N, n]
 
     # Compute second derivatives with respect to asset prices.
-    # We want V_SS[:, i,j] = ∂²V/(∂S_i ∂S_j) for i,j=1,...,n.
+    # We want V_SS[:, i,j] = \partial^2 V/(\partial S_i  \partial S_j) for i,j=1,...,n.
     V_SS = torch.zeros(N, n, n, device=X1.device)
     for i in range(n):
         # Compute gradient of V_S[:, i] with respect to X1.
@@ -54,7 +61,6 @@ def black_scholes_multi_dimensional(y_hat, X1, config):
     # First-order term: sum_i r * S_i * (∂V/∂S_i)
     term1 = r * torch.sum(S * V_S, dim=1, keepdim=True)
 
-    # print(V_SS.shape, S[:, 0].shape)
     term2 = 0
     for i in range(n):
         for j in range(n):
@@ -69,14 +75,24 @@ def black_scholes_multi_dimensional(y_hat, X1, config):
 
     term2 *= 0.5
     term2 = term2.view(-1, 1)
-    # print(term2.shape, term1.shape, y_hat.shape, V_t.shape)
+
     # PDE residual: V_t + (first-order term) + (second-order term) - r * V.
     residual = V_t + term1 + term2 - r * y_hat
-    # print(torch.max(residual), torch.min(residual))
     return residual
 
 
-def black_scholes_1D(y1_hat, X1, config):
+def black_scholes_1D(y1_hat: torch.tensor, X1: torch.tensor, config: dict) -> torch.tensor:
+    """Computes the PDE residual for the Black-Scholes PDE
+
+    Args:
+        y_hat (torch.tensor): Predicted option prices
+        X1 (torch.tensor):    Input points to network
+        config (dict):        Dictionary with hyperparameters
+
+    Returns:
+        torch.tensor:         Numerically approximated PDE residual in input points
+    """
+
     sigma = config["sigma"]
     r = config["r"]
 
@@ -89,12 +105,23 @@ def black_scholes_1D(y1_hat, X1, config):
     d2VdS2 = grads2nd[:, 1].view(-1, 1)
 
     S1 = X1[:, 1].view(-1, 1)
-    bs_pde = dVdt + (0.5 * ((sigma**2) * (S1 ** 2)) * d2VdS2) + \
+    residual = dVdt + (0.5 * ((sigma**2) * (S1 ** 2)) * d2VdS2) + \
         (r * S1 * dVdS) - (r * y1_hat)
-    return bs_pde
+    return residual
 
 
-def black_scholes_american_1D(y1_hat, X1, config):
+def black_scholes_american_1D(y1_hat: torch.tensor, X1: torch.tensor, config: dict) -> torch.tensor:
+    """Computes the PDE residual for the American put Black-Scholes PDE
+
+    Args:
+        y_hat (torch.tensor): Predicted option prices
+        X1 (torch.tensor):    Input points to network
+        config (dict):        Dictionary with hyperparameters
+
+    Returns:
+        torch.tensor:         Numerically approximated PDE residual in input points
+    """
+
     sigma = config["sigma"]
     r = config["r"]
     K = config["K"]
@@ -109,20 +136,39 @@ def black_scholes_american_1D(y1_hat, X1, config):
     bs_pde = dVdt + (0.5 * ((sigma * S1) ** 2) * d2VdS2) + \
         (r * S1 * dVdS) - (r * y1_hat)
 
-    # free region: option exercise immediately
+    # Put option payoff function
     yint = torch.max(K - S1, torch.zeros_like(S1))
     free_pde = y1_hat - yint
 
-    combined_pde = bs_pde * free_pde
+    residual = bs_pde * free_pde
 
+    # Price should always be bigger than the immidieate payoff
     free_boundary = torch.min(free_pde, torch.zeros_like(y1_hat))
-    # print(free_boundary)
-    # print(type(combined_pde[1]))
-    return combined_pde, free_boundary
+    return residual, free_boundary
 
 
-def create_validation_data(dataloader:
-                           DataGeneratorEuropean1D, N_validation: int, config: dict) -> dict:
+def create_validation_data(dataloader:  Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                           N_validation: int,
+                           config: dict) -> dict:
+    """Creates a dictionary containing validation data
+
+    Args:
+        dataloader Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]:   Dataloader used to generate points
+        N_validation (int):                     Number of points to sample, recall that this is scaled different for different regions.
+        config (dict):                          Dictionary with hyperparameters
+
+    Returns:
+        dict: Dictionary with sampled scaled points and targets for inner domain and boundary,
+              expiry_x_tensor_validation - Point from expiry at t = T.
+              expiry_y_tensor_validation - Analytical solution at expiry.
+              lower_x_tensor_validation  - Point from S = S_min.
+              lower_y_tensor_validation  - Analytical solution at S= S_min.
+              upper_x_tensor_validation  - Point from S = S_max.
+              upper_y_tensor_validation  - Analytical solution at S= S_max.
+              X1_validation              - Points from the inner domain.
+              y1_validation              - Just a tensor with zeros, as the PDE residual should equal zero.
+    """
+
     w_expiry = config["w_expiry"]
     w_lower = config["w_lower"]
     w_upper = config["w_upper"]
@@ -182,7 +228,24 @@ def create_validation_data(dataloader:
     return validation_data
 
 
-def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_history, PDE):
+def train_one_epoch(model: PINNforwards,
+                    dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                    loss_function: Callable[[torch.tensor, torch.tensor], torch.tensor],
+                    optimizer: torch.optim.Optimizer,
+                    config: dict,
+                    loss_history: dict,
+                    PDE: Callable[[torch.tensor, torch.tensor], torch.tensor]) -> None:
+    """Performs one epoch of training
+
+    Args:
+        model (PINNforwards):               Model currently being trained.
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]): Dataloader used to sample points.
+        loss_function (Callable[[torch.tensor, torch.tensor], torch.tensor]): Loss function from torch.nn 
+        optimizer (torch.optim.Optimizer):  The optimizer for updating the model's parameters.
+        config (dict): _description_        Dictionary with hyperparameters.
+        loss_history (dict):                Dictionary used to store the loss history.
+        PDE (Callable):                     Function which computes the PDE residual for the inner domain points.
+    """
     model.train()
 
     w_expiry = config["w_expiry"]
@@ -204,10 +267,7 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
     lower_x_tensor, lower_y_tensor, upper_x_tensor, upper_y_tensor = dataloader.get_boundary_data_tensor(
         N_sample, w_lower, w_upper)
 
-    # config["encoder"](lower_x_tensor)
     lower_x_tensor = dataloader.normalize(lower_x_tensor)
-
-    # config["encoder"](upper_x_tensor)
     upper_x_tensor = dataloader.normalize(upper_x_tensor)
 
     lower_y_pred = model(lower_x_tensor)
@@ -271,34 +331,34 @@ def train_one_epoch(model, dataloader, loss_function, optimizer, config, loss_hi
         if config["american_option"]:
             loss_history["loss_free_boundary"].append(
                 loss_free_boundary.item())
-    """ if config["epoch"] % config["update_lambda"] == 0:
-        # We have to divide by 2 to get the MSE of the boundary condition
-        mse_boundary = (mse_lower.item() + mse_upper.item())/2
-
-        mse_sum = mse_boundary + mse_expiry.item() + loss_pde.item()
-
-        new_lambda_boundary = mse_boundary / max(mse_sum, 1e-6)
-        new_lambda_expiry = mse_expiry.item() / max(mse_sum, 1e-6)
-        new_lambda_pde = loss_pde.item() / max(mse_sum, 1e-6)
-
-        alpha = config["alpha_lambda"]
-        config["lambda_boundary"] = alpha * \
-            config["lambda_boundary"] + (1 - alpha) * new_lambda_boundary
-
-        config["lambda_expiry"] = alpha * \
-            config["lambda_expiry"] + (1 - alpha) * new_lambda_expiry
-
-        config["lambda_pde"] = alpha * \
-            config["lambda_pde"] + (1 - alpha) * new_lambda_pde
-
-        for lambda_name in ["lambda_pde", "lambda_boundary", "lambda_expiry"]:
-            loss_history[lambda_name].append(config[lambda_name])
-
-        # print(config["lambda_pde"], config["lambda_boundary"],
-        #      config["lambda_expiry"]) """
 
 
-def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: dict, filename: str, PDE, validation_data: dict = {}, final_learning_rate=1e-5):
+def train(model: PINNforwards,
+          nr_of_epochs: int,
+          learning_rate: float,
+          dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+          config: dict,
+          filename: str,
+          PDE: Callable[[torch.tensor, torch.tensor], torch.tensor],
+          validation_data: dict = {},
+          final_learning_rate: float = 1e-5) -> int:
+    """Main training function
+
+    Args:
+        model (PINNforwards):   Model currently being trained.
+        nr_of_epochs (int):     Number of epochs to train model for.
+        learning_rate (float):  Initial learning rate to use in optimizer.
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]): Dataloader used to generate training data.
+        config (dict):          Dictionary with hyperparameters
+        filename (str):         Filename to store loss as
+        PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]): Function which computes the PDE residual for the inner domain points.
+        validation_data (dict, optional): Dictionary containing validation data. Defaults to {}.
+        final_learning_rate (float, optional): Final learning rate. Defaults to 1e-5.
+
+    Returns:
+        int: Best validation epoch
+    """
+
     epochs_before_validation = config["epochs_before_validation"]
     n = np.log(final_learning_rate / learning_rate) / np.log(config["gamma"])
 
@@ -320,9 +380,6 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
 
     loss_history = {i: [] for i in types_of_loss}
     loss_history_validation = {i: [] for i in types_of_loss}
-
-    """ for lambda_name in ["lambda_pde", "lambda_boundary", "lambda_expiry"]:
-        loss_history[lambda_name] = [config[lambda_name]] """
 
     loss_function = nn.MSELoss()
     best_validation = float("inf")
@@ -351,7 +408,6 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
 
         if epoch % scheduler_step == 0:
             scheduler.step()
-            # print(f"learning rate : {optimizer.param_groups[0]['lr']}")
 
         model.train(False)
         model.eval()
@@ -424,7 +480,6 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
 
             if loss.item() < best_validation:
                 best_validation = loss.item()
-                # print("best validation", best_validation)
                 best_validation_epoch = epoch
                 best_model = copy.deepcopy(model.state_dict())
 
@@ -432,20 +487,15 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
         (nr_of_epochs // config["epochs_before_validation_loss_saved"], len(types_of_loss)))
     loss_array = np.zeros(
         (nr_of_epochs // config["epochs_before_loss_saved"], len(types_of_loss)))
-    # lambda_values = np.zeros((nr_of_epochs // config["update_lambda"] + 1, 3))
 
     for i, name in enumerate(types_of_loss):
         validation_array[:, i] = loss_history_validation[name]
         loss_array[:, i] = loss_history[name]
 
-    """ for i, lambda_name in enumerate(["lambda_pde", "lambda_boundary", "lambda_expiry"]):
-        lambda_values[:, i] = loss_history[lambda_name] """
-
     if config["save_loss"]:
         np.save("results/loss_" + filename, loss_array)
         np.save("results/validation_" +
                 filename, validation_array)
-        # np.save("results/lambda_values_" + filename, lambda_values)
 
     if config["save_model"]:
         torch.save(
@@ -455,81 +505,3 @@ def train(model, nr_of_epochs: int, learning_rate: float, dataloader, config: di
     model.load_state_dict(best_model)
 
     return best_validation_epoch
-
-
-if __name__ == "__main__":
-    torch.manual_seed(2024)
-    np.random.seed(2024)
-
-    config = {}
-
-    # S_range = [0, 100]
-    # t_range = [0, 1]
-    # S_range = np.array([[0, 100] for i in range(5)])
-    # sigma = np.ones((5, 5))
-
-    # dataloader = DataloaderEuropean1D(t_range, S_range, K, r, sigma, DEVICE)
-
-    config["w_expiry"] = 1
-    config["w_lower"] = 1
-    config["w_upper"] = 1
-    config["N_sample"] = 1_000
-    config["pde_learning_rate"] = 60
-    config["K"] = 40
-    config["t_range"] = [0, 1]
-    config["S_range"] = [0, 100]
-    # config["BVP1_PENALTY"] = 8
-    config["sigma"] = 0.25
-    config["r"] = 0.04
-    config["learning_rate"] = 1e-4
-    config["save_model"] = True
-    config["save_loss"] = True
-
-    """ try_different_learning_rates(
-        config, DataloaderAmerican1D, black_scholes_american_1D, "important_results/mse_data_learning_rates_american.txt", "important_results/epoch_data_learning_rates_american.txt") """
-
-    config["S_range"] = np.array([[0, 100], [0, 10], [0, 20], [0, 200]])
-    config["sigma"] = np.array([[1, 0.1, 0.1, 0.1], [0.1, 1, 0.1, 0.1],
-                                [0.1, 0.1, 1, 0.1], [0.1, 0.1, 0.1, 1]])
-
-    # try_multiple_activation_function_european_1D(
-    #    config, DataloaderEuropeanMultiDimensional, black_scholes_multi_dimensional, "important_results/mse_data_activation_multi.txt")
-
-    """ model = PINNforwards(2, 1, 300, 5)
-    dataloader = DataloaderAmerican1D([0, 1], [0, 100], 40, 0.04, 0.25, DEVICE)
-    validation_data = create_validation_data(dataloader, 2_000, config)
-    train(model, 10_000, 1e-4, dataloader, config, "america_test",
-          black_scholes_american_1D, validation_data) """
-
-    """ try_different_learning_rates(
-        config, DataloaderEuropean1D, black_scholes_1D, "important_results/mse_data_learning_rates.txt", "important_results/epoch_data_learning_rates.txt")
-    try_multiple_activation_function_european_1D(
-        config, DataloaderEuropean1D, black_scholes_1D, "important_results/different_activation.txt") """
-
-    """ model = PINNforwards(2, 1, 500, 2).to(DEVICE)
-    validation_data = create_validation_data(dataloader, 1_000, config)
-    train(model, 10_000, 1e-4, dataloader, config,
-          "test_analytical", black_scholes_1D, validation_data) """
-
-    """ for nr_of_layers in [1, 2, 3, 4, 5, 6, 7]:
-        for width in [10, 20, 40, 80, 160, 320, 560]:
-            filename = f"multi_{nr_of_layers}_{width}"
-            model = PINNforwards(6, 1, width, nr_of_layers).to(DEVICE)
-            train(model, 30_000, LEARNING_RATE, dataloader, config,
-                  filename, black_scholes_multi_dimensional, validation_data) """
-
-    """ for N in [100, 500, 1_000, 2_000, 4_000, 8_000, 16_000]:
-        config["N_sample"] = N
-        filename = f"test_N_{N}"
-        model = PINNforwards(2, 1, HIDDEN_WIDTH, HIDDEN_LAYER).to(DEVICE)
-        train(model, 30_000, LEARNING_RATE, dataloader,
-            config, filename, black_scholes_1D, validation_data) """
-
-    """ X1_validation = validation_data["X1_validation"]
-    analytical_solution = dataloader.get_analytical_solution(
-        X1_validation[:, 1], X1_validation[:, 0]).cpu().detach().numpy()
-
-    np.savetxt("results/analytical_" + filename +
-               ".txt", analytical_solution)
-    np.savetxt("results/validation_data.txt",
-               X1_validation.cpu().detach().numpy()) """

@@ -1,15 +1,32 @@
 import torch.nn as nn
 import torch
-from scipy.stats import norm
 import rff
+from typing import Tuple
+
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(DEVICE)
 
 
 class PINNforwards(nn.Module):
-    def __init__(self, N_INPUT, N_OUTPUT, N_HIDDEN, N_LAYERS, activation_function=nn.Tanh,
-                 use_fourier_transform: bool = True, sigma_FF: float = 1.0, encoded_size: int = 128, custom_arc=None):
+    """Class for feed-forward neural network"""
+
+    def __init__(self, N_INPUT: int, N_OUTPUT: int, N_HIDDEN: int, N_LAYERS: int, activation_function=nn.Tanh,
+                 use_fourier_transform: bool = True, sigma_FF: float = 5.0, encoded_size: int = 128, custom_arc: list[int] = None) -> None:
+        """Constructor
+
+        Args:
+            N_INPUT (int):   Dimension of input.
+            N_OUTPUT (int):  Dimension of output.
+            N_HIDDEN (int):  Number of nodes in hidden layers.
+            N_LAYERS (int):  Number of hidden layers (network gets one more than specified, due to input layer).   
+            activation_function (nn.function, optional): Activation function for all layers. Defaults to nn.Tanh.
+            use_fourier_transform (bool, optional):      Bool indicating if network should Fourier transform the input. Defaults to True.
+            sigma_FF (float, optional):                  Variance of Fourier embedding. Defaults to 1.0.
+            encoded_size (int, optional):                Fourier emebedding size. Defaults to 128.
+            custom_arc (list[int], optional):            List containing number of nodes in each layer. Defaults to None, if not None it owerwrites model arcitechture.
+        """
+
         super(PINNforwards, self).__init__()
 
         print("Training model with: ")
@@ -37,6 +54,7 @@ class PINNforwards(nn.Module):
 
         layers = []
 
+        # Constructing layers
         if custom_arc is None:
             self.input_layer = nn.Sequential(
                 nn.Linear(N_INPUT, N_HIDDEN),
@@ -56,21 +74,29 @@ class PINNforwards(nn.Module):
                 layers.append(nn.Linear(custom_arc[i-1], custom_arc[i]))
                 layers.append(self.activation())
 
-            # print(layers)
             self.output_layer = nn.Linear(custom_arc[-1], N_OUTPUT)
 
         self.hidden_layers = nn.Sequential(*layers)
 
         self._initialize_weights()
 
-    def _initialize_weights(self):
+    def _initialize_weights(self) -> None:
+        """Glorot initializes weights"""
         for layer in self.modules():
             if isinstance(layer, nn.Linear):
                 nn.init.xavier_uniform_(layer.weight)
                 if layer.bias is not None:
                     nn.init.zeros_(layer.bias)
 
-    def forward(self, x):
+    def forward(self, x: torch.tensor) -> torch.tensor:
+        """Performs a forward pass of the network
+
+        Args:
+            x (torch.tensor): Input tensor
+
+        Returns:
+            torch.tensor: Output of forward pass
+        """
         if self.use_fourier_transform:
             x = self.encoder(x)
 
@@ -79,7 +105,23 @@ class PINNforwards(nn.Module):
         x = self.output_layer(x)
         return x
 
-    def estimate_greeks_call(self, X_scaled: torch.tensor, X: torch.tensor, sigma: float, T: float):
+    def estimate_greeks_call(self,
+                             X_scaled: torch.tensor,
+                             X: torch.tensor,
+                             sigma: float,
+                             T: float) -> Tuple[torch.tensor, torch.tensor, torch.tensor, torch.tensor, torch.tensor]:
+        """Estimates the Greeks for a European call option
+
+        Args:
+            X_scaled (torch.tensor):    Scaled input, consisting of asset prices and time
+            X (torch.tensor):           Non-scaled input
+            sigma (float):              Volatility in model
+            T (float):                  Final time in market
+
+        Returns:
+            torch.tensor: Approximated Greeks in the input points.
+        """
+
         F = self.forward(X_scaled)
 
         grads = torch.autograd.grad(F, X, grad_outputs=torch.ones(F.shape).to(
@@ -100,38 +142,3 @@ class PINNforwards(nn.Module):
         rho = -(T - t) * (F - S * delta)
 
         return delta, gamma, theta, nu, rho
-
-
-""" class PINNbackwards(PINNforwards):
-    def __init__(self, N_INPUT, N_OUTPUT, N_HIDDEN, N_LAYERS, activation_function=nn.Tanh, initial_sigma=0.1):
-        super(PINNbackwards, self).__init__(N_INPUT, N_OUTPUT, N_HIDDEN,
-                                            N_LAYERS, activation_function)
-        self.sigma = nn.Parameter(torch.tensor(
-            initial_sigma, requires_grad=True))
-
-    def foward_with_european_1D(self, X_scaled: torch.tensor, X: torch.tensor, r: float):
-        y1_hat = super().forward(X_scaled)
-        prediction = super().forward(X_scaled)
-
-        grads = torch.autograd.grad(y1_hat, X, grad_outputs=torch.ones(y1_hat.shape).to(
-            DEVICE), retain_graph=True, create_graph=True, only_inputs=True)[0]
-        dVdt, dVdS = grads[:, 0].view(-1, 1), grads[:, 1].view(-1, 1)
-
-        grads2nd = torch.autograd.grad(dVdS, X, grad_outputs=torch.ones(
-            dVdS.shape).to(DEVICE), create_graph=True, only_inputs=True)[0]
-        d2VdS2 = grads2nd[:, 1].view(-1, 1)
-
-        S1 = X[:, 1].view(-1, 1)
-
-        dt_term = dVdt
-        sigma_term = 0.5*(self.sigma * self.sigma) * (S1 * S1) * d2VdS2
-        ds_term = r * S1 * dVdS
-        y1_hat_term = r * y1_hat
-
-        bs_pde = dt_term + ds_term + sigma_term - y1_hat_term
-
-        # print(nn.MSELoss()(sigma_term, torch.zeros_like(sigma_term)))
-        # print(ds_term + dt_term + y1_hat_term)
-        # print("Sigma term", d2VdS2)
-        return prediction, bs_pde
- """

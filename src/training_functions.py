@@ -10,24 +10,58 @@ from torch.distributions import Normal
 import time
 import datetime as dt
 from train import create_validation_data
+from typing import Callable, Union
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(DEVICE)
 
 
-def MSE_numpy(target: np.array, prediction: np.array):
+def MSE_numpy(target: np.array, prediction: np.array) -> float:
+    """Computes the mean squared error (MSE) between targets and predictions
+
+    Args:
+        target (np.array):     Numpy array with target.
+        prediction (np.array): Numpy array with predictions.
+
+    Returns:
+        float: mean squared error (MSE).
+    """
     return np.square(np.subtract(target.flatten(), prediction.flatten())).mean()
 
 
-def RMSE_numpy(target: np.array, prediction: np.array):
+def RMSE_numpy(target: np.array, prediction: np.array) -> float:
+    """Compute root mean squared error (RMSE)
+
+    Args:
+        target (np.array):     Numpy array with target.
+        prediction (np.array): Numpy array with predictions.
+
+    Returns:
+        float: root mean squared error (RMSE).
+    """
     return np.sqrt(MSE_numpy(target, prediction))
 
 
-def standard_normal_pdf(x):
+def standard_normal_pdf(x: torch.tensor):
+    """Computes the pdf for a normal distribution with mean 0 and variance 1."""
     return (1 / torch.sqrt(torch.tensor(2 * torch.pi))) * torch.exp(-x.pow(2) / 2)
 
 
-def compute_test_loss(model, test_data: dict, dataloader, analytical_solution_filename: str = None):
+def compute_test_loss(model: PINNforwards,
+                      test_data: dict,
+                      dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                      analytical_solution_filename: str = None) -> float:
+    """Computes the RMSE on the test data set
+
+    Args:
+        model (PINNforwards):       Trained model.
+        test_data (dict):           Dictionary containing test data
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]): Datagenerator used to generate test data.
+        analytical_solution_filename (str, optional): If analyzing American option, providing this will load the data. Defaults to None.
+
+    Returns:
+        float: RMSE on test data
+    """
     X1_test = test_data["X1_validation"]
     X1_test_scaled = test_data["X1_validation_scaled"]
 
@@ -40,6 +74,7 @@ def compute_test_loss(model, test_data: dict, dataloader, analytical_solution_fi
     upper_x_tensor_test = test_data["upper_x_tensor_validation_scaled"]
     upper_y_tensor_test = test_data["upper_y_tensor_validation"]
 
+    # Check if we are approximating a American option
     if analytical_solution_filename is None:
         analytical_solution = dataloader.get_analytical_solution(
             X1_test[:, 1:], X1_test[:, 0])  # .cpu().detach().numpy()
@@ -83,11 +118,35 @@ def compute_test_loss(model, test_data: dict, dataloader, analytical_solution_fi
     return RMSE
 
 
-def try_multiple_activation_functions(config: dict, dataloader, PDE, filename1: str, filename2: str, activation_functions: list, layers: list, validation_data: dict, test_data, analytical_solution_filename: str = None, epochs=600_000):
-    mse_data = np.zeros((len(activation_functions), len(layers)))
-    used_epochs = np.zeros((len(activation_functions), len(layers)))
+def try_multiple_activation_functions(config: dict,
+                                      dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                                      PDE: Callable[[torch.tensor, torch.tensor], torch.tensor],
+                                      filename1: str,
+                                      filename2: str,
+                                      activation_functions: list,
+                                      layers: list, validation_data: dict,
+                                      test_data: dict,
+                                      analytical_solution_filename: str = None,
+                                      epochs: int = 600_000) -> None:
+    """Try different activation functions and number of layers in model.
 
-    MSE = nn.MSELoss()
+    Args:
+        config (dict):               Dictionary with hyperparameters.
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]): Dataloader used to generate training data.
+        PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]): Function which computes the PDE residual for the inner domain points.
+        filename1 (str): Filename to save RMSE data as.
+        filename2 (str): Filename to save number of epochs as.
+        activation_functions (list): List of activation functions to try
+        layers (list):               List of number of layers to try
+        validation_data (dict):      Dictionary containing validation data
+        test_data (dict):            Dictionary containing test data
+        analytical_solution_filename (str, optional): If analyzing American option, providing this will load the data. Defaults to None.
+        epochs (int, optional): Number of epochs to train model for. Defaults to 600_000.
+    """
+
+    rmse_data = np.zeros((len(activation_functions), len(layers)))
+    epoch_data = np.zeros((len(activation_functions), len(layers)))
+
     for i, activation_function in enumerate(activation_functions):
         for j, layer in enumerate(layers):
             model = PINNforwards(N_INPUT=config["N_INPUT"], N_OUTPUT=1, N_HIDDEN=128, N_LAYERS=layer, activation_function=activation_function,
@@ -100,23 +159,51 @@ def try_multiple_activation_functions(config: dict, dataloader, PDE, filename1: 
             model.train(False)
             model.eval()
 
-            mse_data[i, j] = compute_test_loss(
+            rmse_data[i, j] = compute_test_loss(
                 model=model, test_data=test_data, dataloader=dataloader, analytical_solution_filename=analytical_solution_filename)
 
-            used_epochs[i, j] = epoch
+            epoch_data[i, j] = epoch
 
             print(f"Trial {j + i*len(layers) + 1} / {len(layers)
                   * len(activation_functions)} Done")
-            print("RMSE", mse_data[i, j])
-    np.savetxt(filename1, mse_data)
-    np.savetxt(filename2, used_epochs)
+            print("RMSE", rmse_data[i, j])
+    np.savetxt(filename1, rmse_data)
+    np.savetxt(filename2, epoch_data)
 
 
-def try_different_learning_rates(config: dict, dataloader, PDE, filename1: str, filename2: str, learning_rates: list, batch_sizes: list, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 600_000, custom_arc: list[int] = None):
+def try_different_learning_rates(config: dict,
+                                 dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                                 PDE: Callable[[torch.tensor, torch.tensor], torch.tensor],
+                                 filename1: str,
+                                 filename2: str,
+                                 learning_rates: list,
+                                 batch_sizes: list,
+                                 validation_data: dict,
+                                 test_data: dict,
+                                 analytical_solution_filename: str = None,
+                                 epochs: int = 600_000,
+                                 custom_arc: list[int] = None) -> None:
+    """Try different initial learning rates and batch sizes.
+
+    Args:
+        config (dict):                      Dictionary with hyperparameters.
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]): Dataloader used to generate training data.
+        PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]):  Function which computes the PDE residual for the inner domain points.
+        filename1 (str):                    Filename to save RMSE data as.
+        filename2 (str):                    Filename to save number of epochs as.
+        learning_rates (list):              List of initial learnign rates to try
+        batch_sizes (list):                 List of batch sizes to try
+        validation_data (dict):             Dictionary containing validation data
+        test_data (dict):                   Dictionary containing test data
+        analytical_solution_filename (str, optional): If analyzing American option, providing this will load the data. Defaults to None.. Defaults to None.
+        epochs (int, optional):             Number of epochs to train model for. Defaults to 600_000.
+        custom_arc (list[int], optional):   List containing number of nodes in each layer. Defaults to None, if not None it owerwrites model arcitechture.
+    """
+
     cur_config = copy.deepcopy(config)
 
     epoch_data = np.zeros((len(learning_rates), len(batch_sizes)))
-    mse_data = np.zeros((len(learning_rates), len(batch_sizes)))
+    rmse_data = np.zeros((len(learning_rates), len(batch_sizes)))
 
     if custom_arc is None:
         model = PINNforwards(N_INPUT=config["N_INPUT"], N_OUTPUT=1, N_HIDDEN=128,
@@ -140,23 +227,48 @@ def try_different_learning_rates(config: dict, dataloader, PDE, filename1: str, 
             model.train(False)
             model.eval()
 
-            mse_data[i, j] = compute_test_loss(
+            rmse_data[i, j] = compute_test_loss(
                 model=model, test_data=test_data, dataloader=dataloader, analytical_solution_filename=analytical_solution_filename)
 
             epoch_data[i, j] = best_epoch
 
             print(f"Trial {j + i*len(batch_sizes) +
                   1} / {len(batch_sizes)*len(learning_rates)} Done")
-            print("RMSE", mse_data[i, j])
-    np.savetxt(filename1, mse_data)
+            print("RMSE", rmse_data[i, j])
+    np.savetxt(filename1, rmse_data)
     np.savetxt(filename2, epoch_data)
 
 
-def try_different_architectures(config: dict, dataloader, PDE, filename1: str, filename2: str, layers: list, nodes: list, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 600_000):
-    epoch_data = np.zeros((len(layers), len(nodes)))
-    mse_data = np.zeros((len(layers), len(nodes)))
+def try_different_architectures(config: dict,
+                                dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                                PDE: Callable[[torch.tensor, torch.tensor], torch.tensor],
+                                filename1: str,
+                                filename2: str,
+                                layers: list,
+                                nodes: list,
+                                validation_data: dict,
+                                test_data: dict,
+                                analytical_solution_filename: str = None,
+                                epochs: int = 600_000) -> None:
+    """Try of different number of layers with different number of nodes in each.
 
-    MSE = nn.MSELoss()
+    Args:
+        config (dict):                      Dictionary with hyperparameters.
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]): Dataloader used to generate training data.
+        PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]):  Function which computes the PDE residual for the inner domain points.
+        filename1 (str):                    Filename to save RMSE data as.
+        filename2 (str):                    Filename to save number of epochs as.
+        layers (list):                      List with number of layers to try.
+        nodes (list):                       List with number of nodes in each layer to try.
+        validation_data (dict):             Dictionary containing validation data
+        test_data (dict):                   Dictionary containing test data
+        analytical_solution_filename (str, optional): If analyzing American option, providing this will load the data. Defaults to None.. Defaults to None.
+        epochs (int, optional):             Number of epochs to train model for. Defaults to 600_000.
+        custom_arc (list[int], optional):   List containing number of nodes in each layer. Defaults to None, if not None it owerwrites model arcitechture.
+    """
+
+    epoch_data = np.zeros((len(layers), len(nodes)))
+    rmse_data = np.zeros((len(layers), len(nodes)))
 
     for i, layer in enumerate(layers):
         for j, node in enumerate(nodes):
@@ -169,21 +281,48 @@ def try_different_architectures(config: dict, dataloader, PDE, filename1: str, f
             model.train(False)
             model.eval()
 
-            mse_data[i, j] = compute_test_loss(
+            rmse_data[i, j] = compute_test_loss(
                 model=model, test_data=test_data, dataloader=dataloader, analytical_solution_filename=analytical_solution_filename)
 
             epoch_data[i, j] = best_epoch
 
             print(f"Trial {j + i*len(nodes) +
                   1} / {len(layers)*len(nodes)} Done")
-            print("RMSE", mse_data[i, j])
+            print("RMSE", rmse_data[i, j])
 
-    np.savetxt(filename1, mse_data)
+    np.savetxt(filename1, rmse_data)
     np.savetxt(filename2, epoch_data)
 
 
-def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filename: str,
-                         nr_of_epochs: int, dataloader, config: dict, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, custom_arc: list[int] = None):
+def train_multiple_times(seeds: list[int],
+                         layers: int,
+                         nodes: int,
+                         PDE: Callable[[torch.tensor, torch.tensor], torch.tensor],
+                         filename: str,
+                         nr_of_epochs: int,
+                         dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                         config: dict,
+                         validation_data: dict,
+                         test_data: dict,
+                         analytical_solution_filename: str = None,
+                         custom_arc: list[int] = None) -> None:
+    """Train multiple times with different initial seeds, and compute average loss and validation loss.
+
+    Args:
+        seeds (list[int]):      List inital RNG seeds to use.
+        layers (int):           Number of layers in model.
+        nodes (int):            Number of nodes in each layer of model.
+        PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]): Function which computes the PDE residual for the inner domain points.
+        filename (str):         Filename to save results as.
+        nr_of_epochs (int):     Number of epochs to train model for.
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]):  Dataloader used to generate training data.
+        config (dict):          Dictionary with hyperparameters.
+        validation_data (dict): Dictionary containing validation data
+        test_data (dict):       Dictionary containing test data
+        analytical_solution_filename (str, optional): If analyzing American option, providing this will load the data. Defaults to None.
+        custom_arc (list[int], optional): List containing number of nodes in each layer. Defaults to None, if not None it owerwrites model arcitechture.
+    """
+
     cur_config = config.copy()
     cur_config["save_loss"] = True
     cur_config["save_model"] = False
@@ -246,11 +385,35 @@ def train_multiple_times(seeds: list[int], layers: int, nodes: int, PDE, filenam
     np.savetxt("results/rmse_data_" + filename + ".txt", mse_data)
 
 
-def trying_weight_decay(config: dict, dataloader, PDE, filename1: str, filename2: str, weight_decays: list, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 250_000):
+def trying_weight_decay(config: dict,
+                        dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                        PDE: Callable[[torch.tensor, torch.tensor], torch.tensor],
+                        filename1: str,
+                        filename2: str,
+                        weight_decays: list,
+                        validation_data: dict,
+                        test_data: dict,
+                        analytical_solution_filename: str = None,
+                        epochs: int = 600_000) -> None:
+    """Try different scaling of L2-regularization.
+
+    Args:
+        config (dict):          Dictionary with hyperparameters.
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]):  Dataloader used to generate training data.
+        PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]): Function which computes the PDE residual for the inner domain points.
+        filename1 (str):        Filename to save RMSE as.
+        filename2 (str):        Filename to save epochs as.
+        weight_decays (list):   List with different scaling of L2-regularization to try.
+        validation_data (dict): Dictionary containing validation data
+        test_data (dict):       Dictionary containing test data
+        analytical_solution_filename (str, optional): If analyzing American option, providing this will load the data. Defaults to None.
+        epochs (int, optional): Number of epochs to train model for. Defaults to 600_000.
+    """
+
     cur_config = copy.deepcopy(config)
 
     epoch_data = np.zeros((1, len(weight_decays)))
-    mse_data = np.zeros((1, len(weight_decays)))
+    rmse_data = np.zeros((1, len(weight_decays)))
 
     model = PINNforwards(N_INPUT=config["N_INPUT"], N_OUTPUT=1, N_HIDDEN=128,
                          N_LAYERS=4, use_fourier_transform=config["use_fourier_transform"], sigma_FF=config["sigma_fourier"], encoded_size=config["fourier_encoded_size"])
@@ -266,18 +429,42 @@ def trying_weight_decay(config: dict, dataloader, PDE, filename1: str, filename2
         model.train(False)
         model.eval()
 
-        mse_data[0, i] = compute_test_loss(
+        rmse_data[0, i] = compute_test_loss(
             model=model, test_data=test_data, dataloader=dataloader, analytical_solution_filename=analytical_solution_filename)
 
         epoch_data[0, i] = best_epoch
 
         print(f"Trial {i} /  {len(weight_decays)} Done")
-        print("RMSE", mse_data[0, i])
-    np.savetxt(filename1, mse_data)
+        print("RMSE", rmse_data[0, i])
+    np.savetxt(filename1, rmse_data)
     np.savetxt(filename2, epoch_data)
 
 
-def try_different_lambdas(config: dict, dataloader, PDE, filename1: str, filename2: str, lambdas: list[list[float]], validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 600_000):
+def try_different_lambdas(config: dict,
+                          dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                          PDE: Callable[[torch.tensor, torch.tensor], torch.tensor],
+                          filename1: str,
+                          filename2: str,
+                          lambdas: list[list[float]],
+                          validation_data: dict,
+                          test_data: dict,
+                          analytical_solution_filename: str = None,
+                          epochs: int = 600_000) -> None:
+    """Try different weighting in loss function by changing weighting of loss terms.
+
+    Args:
+        config (dict):                  Dictionary with hyperparameters.
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]): Dataloader used to generate training data.
+        PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]): Function which computes the PDE residual for the inner domain points.
+        filename1 (str):                Filename to save RMSE as.
+        filename2 (str):                Filename to save epochs as.
+        lambdas (list[list[float]]):    2D-list with different weighting to try.
+        validation_data (dict):         Dictionary containing validation data
+        test_data (dict):               Dictionary containing test data
+        analytical_solution_filename (str, optional): If analyzing American option, providing this will load the data. Defaults to None.
+        epochs (int, optional):         Number of epochs to train model for. Defaults to 600_000.
+    """
+
     cur_config = copy.deepcopy(config)
 
     epoch_data = np.zeros(len(lambdas))
@@ -313,11 +500,36 @@ def try_different_lambdas(config: dict, dataloader, PDE, filename1: str, filenam
     np.savetxt(filename2, epoch_data)
 
 
-def try_sigma_fourier_and_embedding_size(config: dict, dataloader, PDE, filename1: str, filename2: str, sigma_fourier: list, embedding_size: list, validation_data: dict, test_data: dict, analytical_solution_filename: str = None, epochs: int = 200_000):
+def try_sigma_fourier_and_embedding_size(config: dict,
+                                         dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                                         PDE: Callable[[torch.tensor, torch.tensor], torch.tensor],
+                                         filename1: str,
+                                         filename2: str,
+                                         sigma_fourier: list,
+                                         embedding_size: list,
+                                         validation_data: dict,
+                                         test_data: dict,
+                                         analytical_solution_filename: str = None,
+                                         epochs: int = 600_000) -> None:
+    """Try different variance and emebedding size in Fourier embedding.
+
+    Args:
+        config (dict):              Dictionary with hyperparameters.
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]): Dataloader used to generate training data.
+        PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]): Function which computes the PDE residual for the inner domain points.
+        filename1 (str):            Filename to save RMSE as.
+        filename2 (str):            Filename to save epochs as.
+        sigma_fourier (list):       List with different variances to try.
+        embedding_size (list):      List with different emebdding sizes to try.
+        validation_data (dict):     Dictionary containing validation data
+        test_data (dict):           Dictionary containing test data
+        analytical_solution_filename (str, optional): If analyzing American option, providing this will load the data. Defaults to None.
+        epochs (int, optional):     Number of epochs to train model for. Defaults to 600_000.       
+    """
     cur_config = copy.deepcopy(config)
 
     epoch_data = np.zeros((len(sigma_fourier), len(embedding_size)))
-    mse_data = np.zeros((len(sigma_fourier), len(embedding_size)))
+    rmse_data = np.zeros((len(sigma_fourier), len(embedding_size)))
 
     for i, sg_fourier in enumerate(sigma_fourier):
         for j, em_size in enumerate(embedding_size):
@@ -333,19 +545,37 @@ def try_sigma_fourier_and_embedding_size(config: dict, dataloader, PDE, filename
             model.train(False)
             model.eval()
 
-            mse_data[i, j] = compute_test_loss(
+            rmse_data[i, j] = compute_test_loss(
                 model=model, test_data=test_data, dataloader=dataloader, analytical_solution_filename=analytical_solution_filename)
 
             epoch_data[i, j] = best_epoch
 
             print(f"Trial {j + i*len(embedding_size) +
                   1} / {len(embedding_size)*len(sigma_fourier)} Done")
-            print("RMSE", mse_data[i, j])
-    np.savetxt(filename1, mse_data)
+            print("RMSE", rmse_data[i, j])
+    np.savetxt(filename1, rmse_data)
     np.savetxt(filename2, epoch_data)
 
 
-def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validation_data: dict, test_data: dict, epochs: int = 250_000):
+def computing_the_greeks(config: dict,
+                         dataloader: Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D],
+                         PDE:  Callable[[torch.tensor, torch.tensor], torch.tensor],
+                         filename: str,
+                         validation_data: dict,
+                         test_data: dict,
+                         epochs: int = 600_000) -> None:
+    """Train a model and compare approximated Greeks on the test data versus analytical solution.
+
+    Args:
+        config (dict):          Dictionary with hyperparameters.
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorEuropeanMultiDimensional, DataGeneratorAmerican1D]): Dataloader used to generate training data.
+        PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]): Function which computes the PDE residual for the inner domain points.
+        filename (str):         Filename to save results as.
+        validation_data (dict): Dictionary containing validation data
+        test_data (dict):       Dictionary containing test data
+        epochs (int, optional): Number of epochs to train model for. Defaults to 600_000.           
+    """
+
     X1_test = test_data["X1_validation"]
     X1_test_scaled = test_data["X1_validation_scaled"]
 
@@ -386,7 +616,7 @@ def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validatio
         model, epochs, config["learning_rate"], dataloader, config, "greeks", PDE, validation_data)
     model.train(False)
     model.eval()
-    # print(analytical_delta.shape, analytical_gamma.shape, analytical_rho.shape, analytical_theta.shape, analytical_nu.shape)
+
     delta, gamma, theta, nu, rho = model.estimate_greeks_call(
         X1_test_scaled, X1_test, sigma, T)
 
@@ -395,14 +625,6 @@ def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validatio
     theta = theta.cpu().detach().numpy()
     nu = nu.cpu().detach().numpy()
     rho = rho.cpu().detach().numpy()
-
-    """ plt.plot(rho.flatten())
-    plt.savefig("plots/pred_rho.png")
-    plt.clf()
-    plt.plot(analytical_rho.flatten())
-    plt.savefig("plots/rho.png") """
-    # print(np.max(analytical_delta), np.max(analytical_gamma), np.max(analytical_theta), np.max(analytical_nu), np.max(analytical_rho))
-    # print(np.min(analytical_delta), np.min(analytical_gamma), np.min(analytical_theta), np.min(analytical_nu), np.min(analytical_rho))
 
     with open(filename, 'w') as outfile:
         outfile.write(f"EPOCHS : {best_epoch}\n")
@@ -417,7 +639,21 @@ def computing_the_greeks(config: dict, dataloader, PDE, filename: str, validatio
         outfile.write(f"RHO    : {RMSE_numpy(analytical_rho, rho):.2e}")
 
 
-def experiment_with_binomial_model(M_values: list[int], dataloader, test_data, filename1: str, filename2: str):
+def experiment_with_binomial_model(M_values: list[int],
+                                   dataloader: DataGeneratorAmerican1D,
+                                   test_data: dict,
+                                   filename1: str,
+                                   filename2: str) -> None:
+    """Computes the test RMSE for the next M-value and compares to last approximated values.
+
+    Args:
+        M_values (list[int]): M-values to try.
+        dataloader (DataGeneratorAmerican1D): Dataloader used to approximate the analytical solution using the Binomial method.
+        test_data (dict): Dictionary containing test data.
+        filename1 (str):  Filename to save RMSE as.
+        filename2 (str):  Filename to save time elapsed for each M-value as.
+    """
+
     tmp_X = test_data["X1_validation"].cpu().detach().numpy()
     prev = np.zeros(tmp_X.shape[0])
 
@@ -438,7 +674,21 @@ def experiment_with_binomial_model(M_values: list[int], dataloader, test_data, f
     np.savetxt(filename2, timings)
 
 
-def try_multiple_dimensions(dimensions: list, config, PDE, filename1: str, filename2: str):
+def try_multiple_dimensions(dimensions: list,
+                            config: dict,
+                            PDE: Callable[[torch.tensor, torch.tensor], torch.tensor],
+                            filename1: str,
+                            filename2: str) -> None:
+    """Computes the test test RMSE for different number of risky assets in market model.
+
+    Args:
+        dimensions (list):  List with different number of risky assets to try. Note the dimension is number of risky assets plus one.
+        config (dict):      Dictionary with hyperparameters. 
+        PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]): Function which computes the PDE residual for the inner domain points.
+        filename1 (str): Filename to save RMSE as.
+        filename2 (str): Filename to save epochs as.
+    """
+
     cur_config = copy.deepcopy(config)
 
     epoch_data = np.zeros((1, len(dimensions)))

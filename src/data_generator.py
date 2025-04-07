@@ -4,12 +4,26 @@ from scipy.stats import qmc
 from tqdm import tqdm
 from torch.distributions import Normal
 from scipy.stats import norm
-
+from typing import Tuple
 # TODO write my own American 1D analytical solution
 
 
 class DataGeneratorEuropean1D:
-    def __init__(self, time_range, S_range, K: float, r: float, sigma: float, DEVICE, seed: int = 2024):
+    """Class to generate training data for a European call option."""
+
+    def __init__(self, time_range: list[float], S_range: list[float], K: float, r: float, sigma: float, DEVICE: torch.device, seed: int = 2024):
+        """Constructor
+
+        Args:
+            time_range (list[float]):   List with [t_min, t_start].
+            S_range (list[float]):      List with [S^min, S^max].
+            K (float):                  Strike price.
+            r (float):                  Risk-free interest rate.
+            sigma (float):              Volatility.
+            DEVICE (torch.device):      Torch device to generate points on
+            seed (int, optional):       Seed for RNGs. Defaults to 2024.
+        """
+
         self.time_range = time_range
         self.S_range = S_range
         self.r = r
@@ -20,24 +34,60 @@ class DataGeneratorEuropean1D:
         self.sampler_2D = qmc.LatinHypercube(d=2, seed=seed)
         self.sampler_1D = qmc.LatinHypercube(d=1, seed=seed)
 
-    def option_function(self, X):
-        # Call option
+    def option_function(self, X: np.array) -> np.array:
+        """Computes the option function for a European call
+
+        Args:
+            X (np.array): Asset prices.
+
+        Returns:
+            np.array: Computed option function.
+        """
         return np.fmax(X - self.K, 0)
 
-    def get_pde_data(self, n):
+    def get_pde_data(self, n: int) -> Tuple[np.array, np.array]:
+        """Generate numpy array with points from the inner domain and target.
+
+        Args:
+            n (int): Number of points to sample
+
+        Returns:
+            Tuple[np.array, np.array]: Sampled points and targets. Targets are zero as the PDE residual should equal zero.
+        """
+
         X = self.sampler_2D.random(n=n)
         X = qmc.scale(X, [self.time_range[0], self.S_range[0]], [
                       self.time_range[1], self.S_range[1]])
         y = np.zeros((n, 1))  # price
         return X, y
 
-    def get_pde_data_tensor(self, N_sample, mul=4):
+    def get_pde_data_tensor(self, N_sample: int, mul: int = 4) -> Tuple[torch.tensor, torch.tensor]:
+        """Generate torch tensor with points from the inner domain and target.
+
+        Args:
+            N_sample (int):       Number of points to sample
+            mul (int, optional):  Factor to multiply number of points to sample with. Defaults to 4.
+
+        Returns:
+            Tuple[torch.tensor, torch.tensor]: Sampled points and targets. Targets are zero as the PDE residual should equal zero.
+        """
+
         X1, y1 = self.get_pde_data(mul*N_sample)
         X1 = torch.from_numpy(X1).float().requires_grad_()
         y1 = torch.from_numpy(y1).float()
         return X1.to(self.DEVICE), y1.to(self.DEVICE)
 
-    def get_expiry_time_data(self, n, w=1):
+    def get_expiry_time_data(self, n: int, w: float = 1) -> Tuple[np.array, np.array]:
+        """Generate numpy array with points from expiry and target.
+
+        Args:
+            n (int):            Number of point to sample.
+            w (float, optional):  Factor to multiply number of points to sample with. Defaults to 1.
+
+        Returns:
+            Tuple[np.array, np.array]: Sampled points and targets.
+        """
+
         sample = self.sampler_1D.random(n=int(w*n))
         sample = qmc.scale(sample, [self.S_range[0]], [self.S_range[1]])
 
@@ -47,13 +97,33 @@ class DataGeneratorEuropean1D:
 
         return X, y
 
-    def get_expiry_time_tensor(self, N_sample, w=1):
+    def get_expiry_time_tensor(self, N_sample: int, w: float = 1) -> Tuple[torch.tensor, torch.tensor]:
+        """Generate numpy array with points from expiry and target.
+
+        Args:
+            N_sample (int):         Number of point to sample.
+            w (float, optional):    Factor to multiply number of points to sample with. Defaults to 1.
+
+        Returns:
+            Tuple[torch.tensor, torch.tensor]: Sampled points and targets.
+        """
         expiry_x, expiry_y = self.get_expiry_time_data(N_sample, w)
         expiry_x_tensor = torch.from_numpy(expiry_x).float()
         expiry_y_tensor = torch.from_numpy(expiry_y).float()
         return expiry_x_tensor.to(self.DEVICE), expiry_y_tensor.to(self.DEVICE)
 
-    def get_boundary_data(self, n, w1=1, w2=1):
+    def get_boundary_data(self, n: int, w1: float = 1, w2: float = 1) -> Tuple[np.array, np.array, np.array, np.array]:
+        """Generate numpy arrays with boundary points and targets.
+
+        Args:
+            n (int):                Number of points to sample from upper and lower boundary.
+            w1 (float, optional):   Factor to multiply number of points from lower boundary with. Defaults to 1.
+            w2 (float, optional):   Factor to multiply number of points from upper boundary with. Defaults to 1.
+
+        Returns:
+            Tuple[np.array, np.array, np.array, np.array]: Sampled points and targets
+        """
+
         T = self.time_range[-1]
         lower_sample = self.sampler_1D.random(n=int(n*w1))
         lower_sample = qmc.scale(
@@ -74,7 +144,18 @@ class DataGeneratorEuropean1D:
 
         return lower_X, lower_y, upper_X, upper_y
 
-    def get_boundary_data_tensor(self, N_sample, w1=1, w2=1):
+    def get_boundary_data_tensor(self, N_sample: int, w1: float = 1, w2: float = 1) -> Tuple[torch.tensor, torch.tensor, torch.tensor, torch.tensor]:
+        """Generate torch tensors with boundary points and targets.
+
+        Args:
+            n (int):                Number of points to sample from upper and lower boundary.
+            w1 (float, optional):   Factor to multiply number of points from lower boundary with. Defaults to 1.
+            w2 (float, optional):   Factor to multiply number of points from upper boundary with. Defaults to 1.
+
+        Returns:
+            Tuple[torch.tensor, torch.tensor, torch.tensor, torch.tensor]: Sampled points and targets
+        """
+
         lower_x, lower_y, upper_x, upper_y = self.get_boundary_data(
             N_sample, w1, w2)
         lower_x_tensor = torch.from_numpy(lower_x).float()
@@ -83,7 +164,17 @@ class DataGeneratorEuropean1D:
         upper_y_tensor = torch.from_numpy(upper_y).float()
         return lower_x_tensor.to(self.DEVICE), lower_y_tensor.to(self.DEVICE), upper_x_tensor.to(self.DEVICE), upper_y_tensor.to(self.DEVICE)
 
-    def get_analytical_solution(self, S, t):
+    def get_analytical_solution(self, S: torch.tensor, t: torch.tensor) -> np.array:
+        """Computes the analytical solution for a European call option in the given points.
+
+        Args:
+            S (torch.tensor): Tensor with asset prices.
+            t (torch.tensor): Tensor with current time.
+
+        Returns:
+            np.array: Computed solution
+        """
+
         tmp_S = S.cpu().detach().numpy().flatten()
         tmp_t = t.cpu().detach().numpy()
 
@@ -106,7 +197,16 @@ class DataGeneratorEuropean1D:
         F = tmp_S * Nd1 - self.K * Nd2 * np.exp(-self.r * t2m)
         return F
 
-    def normalize(self, X):
+    def normalize(self, X: torch.tensor) -> torch.tensor:
+        """Normalize sampled values to the range [0,1]
+
+        Args:
+            X (torch.tensor): Sampled points
+
+        Returns:
+            torch.tensor: Scaled points
+        """
+
         min_values = torch.tensor(
             [self.time_range[0], self.S_range[0]]).to(self.DEVICE)
         max_values = torch.tensor(
@@ -115,14 +215,32 @@ class DataGeneratorEuropean1D:
 
 
 class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
-    def __init__(self, time_range: list, S_range: np.array, K: float, r: float, sigma: np.array, DEVICE: torch.device, seed=2024):
+    """"Class to generate training data for a multi-dimensional geometric mean basket option."""
+
+    def __init__(self, time_range: list[float], S_range: np.array, K: float, r: float, sigma: np.array, DEVICE: torch.device, seed: int = 2024):
+        """Constructor
+
+        Args:
+            time_range (list[float]):   List with [t_min, t_start].
+            S_range (np.array):         Array with [[S^min_1, S^max_1],
+                                                    [S^min_2, S^max_2],
+                                                    ...
+                                                    [S^min_N, S^max_N]]
+            K (float):                  Strike price.
+            r (float):                  Risk-free interest rate.
+            sigma (np.array):           Volatility matrix
+            DEVICE (torch.device):      Torch device to generate points on
+            seed (int, optional):       Seed for RNGs. Defaults to 2024.
+        """
         self.time_range = time_range
         self.S_range = S_range
+
+        # Number of risky assets in the market model
         self.N = len(S_range)
         self.r = r
         self.sigma = sigma
         self.sigma_torch = torch.tensor(sigma).to(DEVICE)
-        # self.cov = torch.tensor(sigma@sigma.T).to(DEVICE)
+
         self.K = K
         self.DEVICE = DEVICE
         self.S_range_mean = np.exp(np.mean(np.log(S_range[:, 1])))
@@ -135,27 +253,48 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
         self.max_values = torch.tensor(
             [self.time_range[1]] + [S[1] for S in self.S_range]).to(self.DEVICE)
 
-        """ self.sampler_multi = qmc.Halton(d=self.N + 1, seed=seed)
-        self.sampler_no_time = qmc.Halton(d=self.N, seed=seed)
-        self.sampler_1D = qmc.Halton(d=1, seed=seed) """
         self.sampler_multi = qmc.LatinHypercube(d=self.N + 1, seed=seed)
         self.sampler_no_time = qmc.LatinHypercube(d=self.N, seed=seed)
         self.sampler_1D = qmc.LatinHypercube(d=1, seed=seed)
 
-    def option_function(self, X):
+    def option_function(self, X: np.array) -> np.array:
+        """Computes the option function to a geometric mean basket option.
+
+        Args:
+            X (np.array): Asset prices
+
+        Returns:
+            np.array: Computed option function
+        """
         # Geometric mean basket option
         log_X = np.log(X)
         geometric_mean = np.exp(np.mean(log_X, axis=1))
-        # zero_tensor = torch.full(geometric_mean.size(), 0).to(self.DEVICE)
         return np.fmax(geometric_mean - self.K, 0)
 
-    def get_pde_data(self, n):
+    def get_pde_data(self, n: int) -> Tuple[np.array, np.array]:
+        """Sample points from the inner domain.
+
+        Args:
+            n (int): Number of point to sample
+
+        Returns:
+            Tuple[np.array, np.array]: Sampled points and targets
+        """
         X = self.sampler_multi.random(n=n)
         X = qmc.scale(X, self.scaler_min, self.scaler_max)
         y = np.zeros((n, 1))
         return X, y
 
-    def get_expiry_time_data(self, n, w=1):
+    def get_expiry_time_data(self, n: int, w: float = 1) -> Tuple[np.array, np.array]:
+        """Sample points and points from expiry, when t = T.
+
+        Args:
+            n (int):                Number of points to sample. 
+            w (float, optional):    Factor to multiply number of points to sample with. Defaults to 1.
+
+        Returns:
+            Tuple[np.array, np.array]: Sampled points and targets
+        """
         sample = self.sampler_no_time.random(n=int(w*n))
         sample = qmc.scale(sample, self.scaler_min[1:], self.scaler_max[1:])
 
@@ -164,19 +303,24 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
         y = self.option_function(X[:, 1:]).reshape(-1, 1)
         return X, y
 
-    def get_boundary_data(self, n, w1=1, w2=1):
-        T = self.time_range[-1]
-        """ lower_X = self.sampler_multi.random(n=int(n*w1))
-        lower_X = qmc.scale(lower_X, self.scaler_min, self.scaler_max)
+    def get_boundary_data(self, n: int, w1: float = 1, w2: float = 1) -> Tuple[np.array, np.array, np.array, np.array]:
+        """Sample points and targets from boundary.
 
-        idx = np.random.randint(1, self.N+1, int(n*w1))
-        for i, cur in enumerate(idx):
-            lower_X[i, cur] = 0.0 """
+        Args:
+            n (int):                Number of points to sample.
+            w1 (float, optional):   Factor to multiply number of points from lower boundary with. Defaults to 1.
+            w2 (float, optional):   Factor to multiply number of points from upper boundary with. Defaults to 1.
+
+        Returns:
+            Tuple[np.array, np.array]: Sampled points and targets
+        """
+        T = self.time_range[-1]
 
         lower_sample = self.sampler_1D.random(n=int(n*w1))
         lower_X = qmc.scale(
             lower_sample, [self.time_range[0]], [self.time_range[1]])
 
+        # We set all asset prices to their minimums
         for i in range(self.N):
             lower_X = np.concatenate(
                 [lower_X, self.S_range[i][0] * np.ones((int(n*w1), 1))], axis=1)
@@ -187,6 +331,7 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
         upper_X = qmc.scale(
             upper_sample, [self.time_range[0]], [self.time_range[1]])
 
+        # We set all asset prices to their maximums
         for i in range(len(self.S_range)):
             upper_X = np.concatenate(
                 [upper_X, self.S_range[i][-1] * np.ones((int(w2*n), 1))], axis=1)
@@ -196,7 +341,17 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
 
         return lower_X, lower_y, upper_X, upper_y
 
-    def get_analytical_solution(self, S, t):
+    def get_analytical_solution(self, S: torch.tensor, t: torch.tensor) -> torch.tensor:
+        """Computes the analytical solution for the given points.
+
+        Args:
+            S (torch.tensor): Asset prices
+            t (torch.tensor): Times
+
+        Returns:
+            torch.tensor: Computed solution for the given points. 
+        """
+
         tmp_S = S.cpu().detach().numpy()
         tmp_t = t.cpu().detach().numpy()
 
@@ -233,17 +388,47 @@ class DataGeneratorEuropeanMultiDimensional(DataGeneratorEuropean1D):
         price = G * Phi_d1 - self.K * np.exp(-self.r * t2m) * Phi_d2
         return price
 
-    def normalize(self, X: torch.tensor):
+    def normalize(self, X: torch.tensor) -> torch.tensor:
+        """Scales the sampled points to be in [0,1].
+
+        Args:
+            X (torch.tensor): Points to scale.
+
+        Returns:
+            torch.tensor: Scaled points.
+        """
+
         res = (X - self.min_values) / (self.max_values - self.min_values)
         return res
 
 
 class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
-    def option_function(self, X):
+    """Class to generate training data for a American put option."""
+
+    def option_function(self, X: np.array) -> np.array:
+        """Computes the option function for a put option.
+
+        Args:
+            X (np.array): Asset prices.
+
+        Returns:
+            np.array: Computed option function.
+        """
         # Put option
         return np.fmax(self.K - X, 0)
 
-    def get_boundary_data(self, n, w1=1, w2=1):
+    def get_boundary_data(self, n: int, w1: float = 1, w2: float = 1) -> Tuple[np.array, np.array, np.array, np.array]:
+        """Sample points and targets from boundary.
+
+        Args:
+            n (int):                Number of points to sample.
+            w1 (float, optional):   Factor to multiply number of points from lower boundary with. Defaults to 1.
+            w2 (float, optional):   Factor to multiply number of points from upper boundary with. Defaults to 1.
+
+        Returns:
+            Tuple[np.array, np.array, np.array, np.array]: Sampled points and targets
+        """
+
         lower_sample = self.sampler_1D.random(n=int(n*w1))
         lower_sample = qmc.scale(
             lower_sample, [self.time_range[0]], [self.time_range[1]])
@@ -262,7 +447,17 @@ class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
         upper_y = np.zeros((int(w2*n), 1))
         return lower_X, lower_y, upper_X, upper_y
 
-    def _compute_analytical_solution(self, S, t, M=1024):
+    def _compute_analytical_solution(self, S: float, t: float, M: int = 1024) -> float:
+        """Approximate the analytical solution of a American put option using the Binomial method.
+
+        Args:
+            S (float): Asset price
+            t (float): _description_
+            M (int, optional): Number of times steps used in approximation. Defaults to 1024.
+
+        Returns:
+            float: Approximated price.
+        """
         T = self.time_range[-1]-t
         delta_t = T / M
         u = np.exp(self.sigma * np.sqrt(delta_t))
@@ -277,7 +472,17 @@ class DataGeneratorAmerican1D(DataGeneratorEuropean1D):
                                        np.exp(-self.r * delta_t) * (p * option_values[:i+1] + (1 - p) * option_values[1:i+2]))
         return option_values[0]
 
-    def get_analytical_solution(self, S, t, M=1024):
+    def get_analytical_solution(self, S: np.array, t: np.array, M=1024) -> np.array:
+        """Compute analytical solution for all points in S and t arrays.
+
+        Args:
+            S (np.array): Array with asset prices.
+            t (np.array): Array with times.
+            M (int, optional): Number of times steps used in approximation. Defaults to 1024.
+
+        Returns:
+            np.array: _description_
+        """
         res = np.array([self._compute_analytical_solution(
             S[i], t[i], M=M) for i in tqdm(range(len(S)), miniters=1_000, maxinterval=1_000)])
         return res
