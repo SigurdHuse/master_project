@@ -84,7 +84,7 @@ if __name__ == "__main__":
     test_data = create_validation_data(
         dataloader=dataloader, N_validation=20_000, config=config)
 
-    torch.manual_seed(2025)
+    """ torch.manual_seed(2025)
     np.random.seed(2025)
     dataloader = DataGeneratorEuropean1D(
         time_range=config["t_range"], S_range=config["S_range"], K=config["K"], r=config["r"], sigma=config["sigma"], DEVICE=DEVICE, seed=2025)
@@ -225,7 +225,7 @@ if __name__ == "__main__":
                                  validation_data=validation_data,
                                  test_data=test_data,
                                  epochs=600_000)
-    config["scheduler_step"] = 1_000
+    config["scheduler_step"] = 1_000 """
 
     torch.manual_seed(2025)
     np.random.seed(2025)
@@ -250,7 +250,7 @@ if __name__ == "__main__":
         outfile.write(f"Best epoch : {best_epoch}\n")
         outfile.write(f"RMSE : {RMSE}")
 
-    torch.manual_seed(2025)
+    """ torch.manual_seed(2025)
     np.random.seed(2025)
     dataloader = DataGeneratorEuropean1D(
         time_range=config["t_range"], S_range=config["S_range"], K=config["K"], r=config["r"], sigma=config["sigma"], DEVICE=DEVICE, seed=2025)
@@ -271,4 +271,4 @@ if __name__ == "__main__":
 
     with open("important_results/european_1D/small_model.txt", 'w') as outfile:
         outfile.write(f"Best epoch : {best_epoch}\n")
-        outfile.write(f"RMSE : {RMSE}")
+        outfile.write(f"RMSE : {RMSE}") """

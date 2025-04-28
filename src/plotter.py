@@ -451,7 +451,7 @@ def plot_heat_map_of_predicted_versus_analytical(model: PINNforwards,
                 pil_kwargs={"quality": 100}, bbox_inches='tight')
 
 
-def plot_loss_and_sigma_backwards_problem(lambda_pdes: list, filename: str) -> None:
+def plot_loss_and_sigma_backwards_problem(lambda_pdes: list, filename: str, pre: str = "scale_") -> None:
     """Plot loss and sigma for inverse problem
 
     Args:
@@ -462,20 +462,27 @@ def plot_loss_and_sigma_backwards_problem(lambda_pdes: list, filename: str) -> N
     fig, ax = plt.subplots(1, 2, figsize=(10, 4))
     x = np.arange(0, 15_000, 1)
 
+    conv = {"0": "0", "1": r"$10^{-1}$", "2": r"$10^{-2}$", "3": r"$10^{-3}$",
+            "4": r"$10^{-4}$", "one": r"$1.0$", "10": r"$10^{1}$"}
+
     for scale in lambda_pdes:
-        X_loss = np.load(f"results_backwards/average_loss_scale_{scale}.npy")
+        X_loss = np.load(f"results_backwards/average_loss_{pre}{scale}.npy")
         X_loss = X_loss[:X_loss.shape[0] // 2, :]
 
-        X_sigma = np.load(f"results_backwards/average_sigma_scale_{scale}.npy")
+        X_sigma = np.load(f"results_backwards/average_sigma_{pre}{scale}.npy")
         X_sigma_std = X_sigma[X_sigma.shape[0]//2:, :]
         X_sigma = X_sigma[: X_sigma.shape[0]//2, :]
 
-        ax[0].plot(x, X_loss[:, 1] + X_loss[:, 0],
-                   label=r"$\lambda_{PDE}$ =" + f"{scale}")
+        if pre == "scale_":
+            label = r"$\lambda_{PDE}$ =" + f"{scale}"
+        else:
+            label = r"$\lambda_{PDE}$ =" + conv[scale]
+        # print(type(label))
+        ax[0].plot(x, X_loss[:, 1] + X_loss[:, 0], label=label)
         ax[1].plot(x, X_sigma.ravel())
         # ax[1].plot(x, X_sigma_std.ravel(), label = r"$\lambda_{PDE}$ =" +f"{scale}")
-
-    ax[1].plot(x, 0.5*np.ones(15_000), label=r"True $\sigma$")
+    if pre == "scale_":
+        ax[1].plot(x, 0.5*np.ones(15_000), label=r"True $\sigma$")
     ax[1].legend()
     ax[1].grid()
 
@@ -502,14 +509,14 @@ def plot_all_sigma_for_two(filename: str) -> None:
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 4))
 
-    X1 = np.load("results_backwards/sigma_scale_0.0001.npy")
+    X1 = np.load("results_backwards/sigma_scale_0.001.npy")
     X2 = np.load("results_backwards/sigma_scale_1000.npy")
 
     for i in range(X1.shape[0]):
         ax[0].plot(X1[i])
         ax[1].plot(X2[i])
 
-    ax[0].set_title(r"$\lambda_{PDE} = 10^{-4}$")
+    ax[0].set_title(r"$\lambda_{PDE} = 10^{-3}$")
     ax[0].grid()
     ax[0].set_ylabel(r"$\sigma$")
     ax[0].set_xlabel("Epoch")
@@ -536,7 +543,7 @@ def plot_log_log_dimensions(filename: str) -> None:
     ax[0].plot(dims, timings, label="Training time", color="midnightblue")
     ax[0].plot(dims, (dims + 10)**4, label=r"$O(N^4)$", color="red")
     ax[0].legend()
-    ax[0].set_xlabel("Dimension (N)")
+    ax[0].set_xlabel("Dimension (N+1)")
     ax[0].set_yscale("log")
     ax[0].set_xscale("log")
     ax[0].xaxis.set_major_formatter(ticker.ScalarFormatter())
@@ -546,7 +553,7 @@ def plot_log_log_dimensions(filename: str) -> None:
 
     ax[1].plot(dims, rmse, label="Test RMSE", color="midnightblue")
     # ax[1].plot(dims, (dims + 1)**4 - (dims + 0.999999)**4, label=r"$O(N^4)$")
-    ax[1].set_xlabel("Dimension (N)")
+    ax[1].set_xlabel("Dimension (N+1)")
     ax[1].legend()
     ax[1].set_yscale("log")
     ax[1].set_ylim(1e-4, 1e-1)
@@ -558,8 +565,77 @@ def plot_log_log_dimensions(filename: str) -> None:
     plt.savefig(filename)
 
 
+def plot_heat_map_of_predicted_versus_analytical_inverse(model: PINNforwards,
+                                                         test_data: str,
+                                                         filename: str,
+                                                         model2: PINNforwards = None) -> None:
+    """Plots heatmap of hetmap versus anlytical for a given model.
+
+    Args:
+        model (PINNforwards): Model we plot heatmap for
+        test_data (dict[torch.tensor]): Filename of test data
+        dataloader (Union[DataGeneratorEuropean1D, DataGeneratorAmerican1D]): Dataloader used to compute analytical solution
+        filename (str): Filename to save plot as
+        analytical_solution_filename (str, optional):  If analyzing American option, providing this will load the data. Defaults to None.
+        model2 (PINNforwards, optional): Model to compare model against if specified. Defaults to None.
+    """
+    min_values = torch.tensor([0.0, 90.34]).to(DEVICE)
+    max_values = torch.tensor([2.42, 293.20]).to(DEVICE)
+
+    data = np.load(test_data)
+    X1_test = torch.from_numpy(data[:, :2]).to(DEVICE)
+    X1_test_scaled = (X1_test - min_values) / (max_values - min_values)
+
+    analytical_solution = data[:, 2].reshape(
+        data.shape[0], -1)
+
+    with torch.no_grad():
+        predicted_pde = model(X1_test_scaled).cpu().detach().numpy()
+
+    if model2 is not None:
+        with torch.no_grad():
+            predicted_pde2 = model2(X1_test_scaled).cpu().detach().numpy()
+
+    X1_test = X1_test.cpu().detach().numpy()
+
+    all_points = X1_test
+    all_preds = predicted_pde
+
+    all_y = analytical_solution
+
+    if model2 is not None:
+        all_preds_2 = predicted_pde2
+        fig, ax = plt.subplots(1, 2, figsize=(10, 4))
+
+        scatter1 = ax[0].scatter(
+            all_points[:, 0], all_points[:, 1], c=np.abs(all_y - all_preds_2).ravel(), norm=LogNorm(),  cmap='plasma')
+        cbar1 = plt.colorbar(scatter1, ax=ax[0])
+        ax[0].set_title(r"$\lambda_{PDE} = 0.0$")
+        ax[0].set_xlabel("Time")
+        ax[0].set_ylabel("Asset price")
+
+        scatter2 = ax[1].scatter(all_points[:, 0], all_points[:, 1], c=np.fmax(np.abs(
+            all_y - all_preds), 1e-8).ravel(), cmap='plasma', norm=LogNorm())
+        cbar2 = plt.colorbar(scatter2, ax=ax[1])
+        ax[1].set_title(r"$\lambda_{PDE} = 10^{-3}$")
+        ax[1].set_xlabel("Time")
+        fig.tight_layout()
+
+    else:
+        scatter2 = plt.scatter(all_points[:, 0], all_points[:, 1], c=np.abs(
+            all_y - all_preds), cmap='plasma', norm=LogNorm())
+        cbar2 = plt.colorbar(scatter2)
+        plt.xlabel("Time")
+        plt.ylabel("Asset price")
+        plt.title("Absolute error")
+
+        plt.tight_layout()
+    plt.savefig(filename, format="jpg", dpi=180,
+                pil_kwargs={"quality": 100}, bbox_inches='tight')
+
+
 if __name__ == "__main__":
-    make_training_plot("plots/fourier_loss.pdf")
+    """ make_training_plot("plots/fourier_loss.pdf")
     plt.clf()
 
     binomial_plot("plots/binomial.pdf")
@@ -624,12 +700,33 @@ if __name__ == "__main__":
     plot_heat_map_of_predicted_versus_analytical(
         american_model, test_data, dataloader_american, "plots/american_model.jpg", analytical_solution_filename="data/test_data_american_1D.npy")
 
+    plot_different_loss("multi_dim", "plots/multi_dim.pdf",
+                        x_values=np.arange(1, 800_000 + 1, 600), use_average=True)
+    plt.clf()
+
     plot_loss_and_sigma_backwards_problem(
         lambda_pdes=["1e-05", "0.0001", "0.001", "0.0", "10", "1000"], filename="plots/loss_vs_sigma.pdf")
     plt.clf()
 
     plot_all_sigma_for_two(filename="plots/sigmas.pdf")
+    plt.clf()
     plot_log_log_dimensions(filename="plots/dimensions.pdf")
-    plot_different_loss("multi_dim", "plots/multi_dim.pdf",
-                        x_values=np.arange(1, 800_000 + 1, 600), use_average=True)
+    plt.clf() """
+
+    plot_loss_and_sigma_backwards_problem(
+        lambda_pdes=["0", "2", "3", "4", "one"], filename="plots/loss_vs_sigma_apple.pdf", pre="apple_data_")
+    plt.clf()
+
+    model_apple_3 = PINNforwards(N_INPUT=2, N_OUTPUT=1, N_HIDDEN=128, N_LAYERS=4,
+                                 use_fourier_transform=True, sigma_FF=5.0, encoded_size=128)
+    model_apple_3.load_state_dict(torch.load(
+        "models/apple_data_3.pth", weights_only=True))
+
+    model_apple_0 = PINNforwards(N_INPUT=2, N_OUTPUT=1, N_HIDDEN=128, N_LAYERS=4,
+                                 use_fourier_transform=True, sigma_FF=5.0, encoded_size=128)
+    model_apple_0.load_state_dict(torch.load(
+        "models/apple_data_0.pth", weights_only=True))
+
+    plot_heat_map_of_predicted_versus_analytical_inverse(
+        model=model_apple_3, test_data="data/apple_data_test.npy", filename="plots/apple_model.jpg", model2=model_apple_0)
     plt.clf()

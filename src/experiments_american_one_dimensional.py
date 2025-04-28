@@ -60,7 +60,7 @@ config["sigma"] = 0.5
 config["r"] = 0.04
 
 # Initial learning rate
-config["learning_rate"] = 1e-3
+config["learning_rate"] = 5e-4
 # Indicates if we should save model at the end of training
 config["save_model"] = False
 # Indicates if we should save loss at the end of training
@@ -86,12 +86,12 @@ if __name__ == "__main__":
     test_data = create_validation_data(
         dataloader=dataloader, N_validation=20_000, config=config)
 
-    experiment_with_binomial_model(M_values=[32, 64, 128, 256, 384, 512, 768, 1024, 1280, 1536, 1792, 2048], dataloader=dataloader, test_data=test_data,
-                                   filename1="important_results/american_1D/RMSE_binomial.txt", filename2="important_results/american_1D/timings_binomial.txt")
+    # experiment_with_binomial_model(M_values=[32, 64, 128, 256, 384, 512, 768, 1024, 1280, 1536, 1792, 2048], dataloader=dataloader, test_data=test_data,
+    #                               filename1="important_results/american_1D/RMSE_binomial.txt", filename2="important_results/american_1D/timings_binomial.txt")
 
-    tmp_X = test_data["X1_validation"].cpu().detach().numpy()
-    test = dataloader.get_analytical_solution(tmp_X[:, 1], tmp_X[:, 0], M=2048)
-    np.save("data/test_data_american_1D", test)
+    # tmp_X = test_data["X1_validation"].cpu().detach().numpy()
+    # test = dataloader.get_analytical_solution(tmp_X[:, 1], tmp_X[:, 0], M=2048)
+    # np.save("data/test_data_american_1D", test)
 
     torch.manual_seed(2025)
     np.random.seed(2025)
@@ -102,7 +102,7 @@ if __name__ == "__main__":
                                  PDE=black_scholes_american_1D,
                                  filename2="important_results/american_1D/epochs_lr.txt",
                                  filename1="important_results/american_1D/RMSE_lr.txt",
-                                 learning_rates=[1e-3, 5e-3, 5e-4],
+                                 learning_rates=[5e-3, 1e-3, 5e-4],
                                  batch_sizes=[256, 512, 1024],
                                  validation_data=validation_data,
                                  test_data=test_data,
