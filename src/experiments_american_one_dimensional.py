@@ -86,12 +86,12 @@ if __name__ == "__main__":
     test_data = create_validation_data(
         dataloader=dataloader, N_validation=20_000, config=config)
 
-    # experiment_with_binomial_model(M_values=[32, 64, 128, 256, 384, 512, 768, 1024, 1280, 1536, 1792, 2048], dataloader=dataloader, test_data=test_data,
-    #                               filename1="important_results/american_1D/RMSE_binomial.txt", filename2="important_results/american_1D/timings_binomial.txt")
+    experiment_with_binomial_model(M_values=[32, 64, 128, 256, 384, 512, 768, 1024, 1280, 1536, 1792, 2048], dataloader=dataloader, test_data=test_data,
+                                   filename1="important_results/american_1D/RMSE_binomial.txt", filename2="important_results/american_1D/timings_binomial.txt")
 
-    # tmp_X = test_data["X1_validation"].cpu().detach().numpy()
-    # test = dataloader.get_analytical_solution(tmp_X[:, 1], tmp_X[:, 0], M=2048)
-    # np.save("data/test_data_american_1D", test)
+    tmp_X = test_data["X1_validation"].cpu().detach().numpy()
+    test = dataloader.get_analytical_solution(tmp_X[:, 1], tmp_X[:, 0], M=2048)
+    np.save("data/test_data_american_1D", test)
 
     torch.manual_seed(2025)
     np.random.seed(2025)

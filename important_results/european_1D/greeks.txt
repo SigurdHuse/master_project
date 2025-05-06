@@ -1,0 +1,6 @@
+EPOCHS : 592110
+DELTA  : 2.28e-03 
+GAMMA  : 9.99e-02 
+THETA  : 2.54e-01 
+NU     : 1.33e-01 
+RHO    : 9.34e-03

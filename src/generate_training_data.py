@@ -89,7 +89,7 @@ if __name__ == "__main__":
         "sigma":  0.5,
         "r": 0.04,
     }
-    config["seed"] = 1
+    """ config["seed"] = 1
     generate_1D_european(1280, config, "european_one_dimensional_train.npy")
     config["seed"] = 2
     generate_1D_european(5_00, config, "european_one_dimensional_val.npy")
@@ -98,4 +98,15 @@ if __name__ == "__main__":
 
     np.random.seed(1000)
     extract_apple_data(nr_of_validation=691,
-                       nr_of_test=3_457, nr_of_training=9_680)
+                       nr_of_test=3_457, nr_of_training=9_680) """
+    for sig in [1, 2, 3, 4]:
+        config["sigma"] = sig
+        config["seed"] = 1
+        generate_1D_european(
+            1280, config, f"european_one_dimensional_train_{sig}.npy")
+        config["seed"] = 2
+        generate_1D_european(
+            5_00, config, f"european_one_dimensional_val_{sig}.npy")
+        config["seed"] = 3
+        generate_1D_european(
+            4_000, config, f"european_one_dimensional_test_{sig}.npy")

@@ -543,7 +543,7 @@ def plot_log_log_dimensions(filename: str) -> None:
     ax[0].plot(dims, timings, label="Training time", color="midnightblue")
     ax[0].plot(dims, (dims + 10)**4, label=r"$O(N^4)$", color="red")
     ax[0].legend()
-    ax[0].set_xlabel("Dimension (N+1)")
+    ax[0].set_xlabel("Dimension")
     ax[0].set_yscale("log")
     ax[0].set_xscale("log")
     ax[0].xaxis.set_major_formatter(ticker.ScalarFormatter())
@@ -553,7 +553,7 @@ def plot_log_log_dimensions(filename: str) -> None:
 
     ax[1].plot(dims, rmse, label="Test RMSE", color="midnightblue")
     # ax[1].plot(dims, (dims + 1)**4 - (dims + 0.999999)**4, label=r"$O(N^4)$")
-    ax[1].set_xlabel("Dimension (N+1)")
+    ax[1].set_xlabel("Dimension")
     ax[1].legend()
     ax[1].set_yscale("log")
     ax[1].set_ylim(1e-4, 1e-1)
@@ -635,7 +635,7 @@ def plot_heat_map_of_predicted_versus_analytical_inverse(model: PINNforwards,
 
 
 if __name__ == "__main__":
-    """ make_training_plot("plots/fourier_loss.pdf")
+    make_training_plot("plots/fourier_loss.pdf")
     plt.clf()
 
     binomial_plot("plots/binomial.pdf")
@@ -711,7 +711,7 @@ if __name__ == "__main__":
     plot_all_sigma_for_two(filename="plots/sigmas.pdf")
     plt.clf()
     plot_log_log_dimensions(filename="plots/dimensions.pdf")
-    plt.clf() """
+    plt.clf()
 
     plot_loss_and_sigma_backwards_problem(
         lambda_pdes=["0", "2", "3", "4", "one"], filename="plots/loss_vs_sigma_apple.pdf", pre="apple_data_")
