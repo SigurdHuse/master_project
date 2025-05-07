@@ -18,7 +18,7 @@ Code was ran with python 3.12.4, install dependencies with:
 ## Generate data and plots from thesis
 Run commands:
 
-```Terminal
+```bash
 > python3 src/experiments_european_one_dimensional.py
 > python3 src/experiments_american_one_dimensional.py
 > python3 src/experiments_european_multi_dimensional.py
