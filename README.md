@@ -69,7 +69,7 @@ equipped with:
 ```bibtex
 @mastersthesis{huse2025, 
   author       = {Sigurd Kjelsbøl Huse},
-  title        = {Physics-Informed Neural Networks for Option Pricing and Volatility Calibration Using the Black–Scholes PDE},
+  title        = {Physics-informed neural networks for option pricing and volatility calibration using the Black–Scholes PDE},
   school       = {University of Oslo}, 
   year         = {2025}, 
   type         = {Master’s thesis}, 
