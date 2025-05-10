@@ -3,9 +3,9 @@ This repository contains code for the master thesis:
 
 **Physics-informed neural networks for option pricing and volatility calibration using the Black–Scholes PDE**
  
-by Sigurd Kjelsbøl Huse 
+by Sigurd Kjelsbøl Huse, 
 
-Supervised by Håkon Andreas Hoel. 
+supervised by Håkon Andreas Hoel. 
 
 ## Abstract
 
