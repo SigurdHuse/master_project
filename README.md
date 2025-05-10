@@ -36,7 +36,7 @@ Run commands:
 All experiments were run on:
 
 Machine learning infrastructure (ML Nodes), University Centre for Information Technology, University Of Oslo, Norway.
-equipped with:
+Equipped with:
 
 - NVIDIA RTX 2080 Ti GPUs
 
