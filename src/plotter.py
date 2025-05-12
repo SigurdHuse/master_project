@@ -261,7 +261,7 @@ def binomial_plot(filename: str) -> None:
     fig, ax = plt.subplots(1, 2, figsize=(9, 3))
 
     ax[0].plot(M_values[1:], rmse[1:], label="RMSE", color="midnightblue")
-    ax[0].plot(M_values[1:], 1 / M_values[1:],
+    ax[0].plot(M_values[1:], 1 / M_values[1:] * rmse[1] * M_values[1]*1.15,
                label=r"$O(M^{-1})$", color="red")
     ax[0].set_yscale('log')
     ax[0].set_xscale("log")
@@ -271,7 +271,7 @@ def binomial_plot(filename: str) -> None:
     ax[0].grid()
 
     ax[1].plot(M_values, timings, label="Runtime", color="midnightblue")
-    ax[1].plot(M_values, M_values**2,
+    ax[1].plot(M_values, M_values**2 / M_values[0]**2 * timings[0]*1.15,
                label=r"$O(M^2)$", color="red")
     ax[1].set_yscale('log')
     ax[1].set_xscale("log")
@@ -544,7 +544,8 @@ def plot_log_log_dimensions(filename: str) -> None:
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 4))
     ax[0].plot(dims, timings, label="Training time", color="midnightblue")
-    ax[0].plot(dims, (dims + 9)**4, label=r"$O(D^4)$", color="red")
+    ax[0].plot(dims, (dims + 0.0)**3 * timings[4] /
+               dims[4]**3 + timings[0] - dims[0]**3, label=r"$O(D^3)$", color="red")
     ax[0].legend()
     ax[0].set_xlabel("Dimension")
     ax[0].set_yscale("log")
