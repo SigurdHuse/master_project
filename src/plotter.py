@@ -21,13 +21,13 @@ from typing import Callable, Union
 torch.set_default_device(DEVICE)
 
 
-mpl.rcParams["figure.titlesize"] = 20
-mpl.rcParams["axes.labelsize"] = 17
-mpl.rcParams["axes.titlesize"] = 15
-mpl.rcParams["legend.fontsize"] = "medium"
-mpl.rcParams["xtick.labelsize"] = 14
-mpl.rcParams["ytick.labelsize"] = 14
-mpl.rcParams["figure.dpi"] = 1_000
+mpl.rcParams["figure.titlesize"] = 22
+mpl.rcParams["axes.labelsize"] = 18
+mpl.rcParams["axes.titlesize"] = 16
+mpl.rcParams["legend.fontsize"] = "large"
+mpl.rcParams["xtick.labelsize"] = 15
+mpl.rcParams["ytick.labelsize"] = 15
+mpl.rcParams["figure.dpi"] = 1_300
 
 
 def get_analytical_solution(S: torch.tensor, t: torch.tensor, t_range: list[float], sigma: float, r: float, K: float) -> torch.tensor:
@@ -88,7 +88,7 @@ def make_training_plot(filename: str) -> None:
     ax[0].plot(x_loss, X_loss[skip:n_loss//2:plot_every, 0],
                label="No Fourier", color="red")
     ax[0].set_yscale("log")
-    ax[0].set_xlabel("epochs")
+    ax[0].set_xlabel("Epoch")
     ax[0].legend()
     ax[0].set_title("Training loss")
     ax[0].grid()
@@ -102,7 +102,7 @@ def make_training_plot(filename: str) -> None:
     ax[1].plot(x_val, X_validation[skip:n_val//2:plot_every, 0],
                label="No Fourier", color="red")
     ax[1].set_yscale("log")
-    ax[1].set_xlabel("epochs")
+    ax[1].set_xlabel("Epoch")
     # as[1].legend()
     ax[1].set_title("Validation loss")
     ax[1].grid()
@@ -270,12 +270,12 @@ def binomial_plot(filename: str) -> None:
     ax[0].legend()
     ax[0].grid()
 
-    ax[1].plot(M_values, timings, label="Run time", color="midnightblue")
+    ax[1].plot(M_values, timings, label="Runtime", color="midnightblue")
     ax[1].plot(M_values, M_values**2,
                label=r"$O(M^2)$", color="red")
     ax[1].set_yscale('log')
     ax[1].set_xscale("log")
-    ax[1].set_ylabel("Run time [s]")
+    ax[1].set_ylabel("Runtime")
     ax[1].set_xlabel("M")
     ax[1].legend()
     ax[1].grid()
@@ -315,7 +315,7 @@ def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, v
                linestyle=(0, (4, 4)), label="Validation loss", color="red")
     ax[0].set_yscale("log")
     # ax[0].set_xscale("log")
-    ax[0].set_xlabel("epoch")
+    ax[0].set_xlabel("Epoch")
     ax[0].legend()
     ax[0].grid()
     ax[0].ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
@@ -332,12 +332,16 @@ def plot_different_loss(name_of_model: str, filename: str, x_values: np.array, v
     if american:
         ax[1].plot(x_values[values_to_skip::skip_every],
                    X_loss[values_to_skip::skip_every, 6], label="Free boundary")
+
     ax[1].grid()
-    ax[1].set_xlabel("epoch")
+    ax[1].set_xlabel("Epoch")
     ax[1].ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
     # plt.plot(X_loss[100::5, 0], label = "Loss")
+    leg = ax[1].legend()
+    if american:
+        leg.set_loc("best")
+        leg.set_bbox_to_anchor((0.6, 0.6))
 
-    ax[1].legend()
     ax[1].set_yscale("log")
     fig.tight_layout()
     plt.savefig(filename)
@@ -444,7 +448,6 @@ def plot_heat_map_of_predicted_versus_analytical(model: PINNforwards,
         cbar2 = plt.colorbar(scatter2)
         plt.xlabel("Time")
         plt.ylabel("Asset price")
-        plt.title("Absolute error")
 
         plt.tight_layout()
     plt.savefig(filename, format="jpg", dpi=180,
@@ -541,15 +544,17 @@ def plot_log_log_dimensions(filename: str) -> None:
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 4))
     ax[0].plot(dims, timings, label="Training time", color="midnightblue")
-    ax[0].plot(dims, (dims + 10)**4, label=r"$O(N^4)$", color="red")
+    ax[0].plot(dims, (dims + 9)**4, label=r"$O(D^4)$", color="red")
     ax[0].legend()
     ax[0].set_xlabel("Dimension")
     ax[0].set_yscale("log")
     ax[0].set_xscale("log")
     ax[0].xaxis.set_major_formatter(ticker.ScalarFormatter())
     ax[0].xaxis.set_minor_formatter(ticker.NullFormatter())
+    ax[0].xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
     # ax[0].set_xlim(2, 13)
     ax[0].grid()
+    ax[0].set_ylabel("Training time")
 
     ax[1].plot(dims, rmse, label="Test RMSE", color="midnightblue")
     # ax[1].plot(dims, (dims + 1)**4 - (dims + 0.999999)**4, label=r"$O(N^4)$")
@@ -557,7 +562,8 @@ def plot_log_log_dimensions(filename: str) -> None:
     ax[1].legend()
     ax[1].set_yscale("log")
     ax[1].set_ylim(1e-4, 1e-1)
-
+    ax[1].xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+    # ax[1].set_xlim(1, 15)
     # ax[1].set_xscale("log")
     ax[1].grid()
 
