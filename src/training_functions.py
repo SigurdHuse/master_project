@@ -519,7 +519,7 @@ def try_sigma_fourier_and_embedding_size(config: dict,
         PDE (Callable[[torch.tensor, torch.tensor], torch.tensor]): Function which computes the PDE residual for the inner domain points.
         filename1 (str):            Filename to save RMSE as.
         filename2 (str):            Filename to save epochs as.
-        sigma_fourier (list):       List with different variances to try.
+        sigma_fourier (list):       List with different standard deviations to try.
         embedding_size (list):      List with different emebdding sizes to try.
         validation_data (dict):     Dictionary containing validation data
         test_data (dict):           Dictionary containing test data

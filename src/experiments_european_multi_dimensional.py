@@ -23,7 +23,7 @@ config["N_INPUT"] = 6
 
 # Indicates if model should Fourier embed input
 config["use_fourier_transform"] = False
-# Variance of Fourier emebedding
+# Standard deviation of Fourier emebedding
 config["sigma_fourier"] = 0.0
 # Embedding size of Fourier encoding
 config["fourier_encoded_size"] = 0

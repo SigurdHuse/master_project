@@ -22,7 +22,7 @@ class PINNforwards(nn.Module):
             N_LAYERS (int):  Number of hidden layers (network gets one more than specified, due to input layer).   
             activation_function (nn.function, optional): Activation function for all layers. Defaults to nn.Tanh.
             use_fourier_transform (bool, optional):      Bool indicating if network should Fourier transform the input. Defaults to True.
-            sigma_FF (float, optional):                  Variance of Fourier embedding. Defaults to 1.0.
+            sigma_FF (float, optional):                  Standard deviation of Fourier embedding. Defaults to 1.0.
             encoded_size (int, optional):                Fourier emebedding size. Defaults to 128.
             custom_arc (list[int], optional):            List containing number of nodes in each layer. Defaults to None, if not None it owerwrites model arcitechture.
         """

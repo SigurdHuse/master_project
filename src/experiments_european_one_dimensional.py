@@ -21,7 +21,7 @@ config["american_option"] = False
 config["N_INPUT"] = 2
 # Indicates if model should Fourier embed input
 config["use_fourier_transform"] = True
-# Variance of Fourier emebedding
+# Standard deviation of Fourier emebedding
 config["sigma_fourier"] = 5.0
 # Embedding size of Fourier encoding
 config["fourier_encoded_size"] = 128
