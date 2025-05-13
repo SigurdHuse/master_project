@@ -544,8 +544,8 @@ def plot_log_log_dimensions(filename: str) -> None:
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 4))
     ax[0].plot(dims, timings, label="Training time", color="midnightblue")
-    ax[0].plot(dims, (dims + 0.0)**3 * timings[4] /
-               dims[4]**3 + timings[0] - dims[0]**3, label=r"$O(D^3)$", color="red")
+    ax[0].plot(dims, (dims)**3 * timings[-1] /
+               dims[-1]**3 * 2.5, label=r"$O(D^3)$", color="red")
     ax[0].legend()
     ax[0].set_xlabel("Dimension")
     ax[0].set_yscale("log")
